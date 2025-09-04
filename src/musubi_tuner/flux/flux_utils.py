@@ -1,7 +1,7 @@
 import json
 import math
 from PIL import Image
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 import einops
 import numpy as np
 import torch
@@ -12,12 +12,8 @@ from musubi_tuner.flux import flux_models
 from musubi_tuner.utils import image_utils
 from musubi_tuner.utils.safetensors_utils import load_safetensors
 from musubi_tuner.utils.train_utils import get_lin_function
-
-import logging
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
+from blissful_tuner.blissful_logger import BlissfulLogger
+logger = BlissfulLogger(__name__, "green")
 
 CLIP_L_TOKENIZER_ID = "openai/clip-vit-large-patch14"
 T5_XXL_TOKENIZER_ID = "google/t5-v1_1-xxl"
@@ -163,7 +159,7 @@ def load_flow_model(
     # if fp8_scaled is True, convert the model to fp8
     if fp8_scaled:
         # fp8 optimization: calculate on CUDA, move back to CPU if loading_device is CPU (block swap)
-        logger.info(f"Optimizing model weights to fp8. This may take a while.")
+        logger.info("Optimizing model weights to fp8. This may take a while.")
         sd = model.fp8_optimization(sd, device, move_to_device=loading_device.type == "cpu")
 
         if loading_device.type != "cpu":

@@ -2,9 +2,7 @@
 import argparse
 import json
 import math
-import os
 from pathlib import Path
-from typing import List, Union
 
 import torch
 from PIL import Image
@@ -13,12 +11,8 @@ from transformers import AutoProcessor
 
 from musubi_tuner.dataset import image_video_dataset
 from musubi_tuner.qwen_image.qwen_image_utils import load_qwen2_5_vl
-
-import logging
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
+from blissful_tuner.blissful_logger import BlissfulLogger
+logger = BlissfulLogger(__name__, "green")
 
 IMAGE_FACTOR = 28  # The image size must be divisible by this factor
 DEFAULT_MAX_SIZE = 1280
@@ -245,7 +239,7 @@ def process_images(args):
             with open(text_file_path, "w", encoding="utf-8") as f:
                 f.write(caption)
 
-        logger.info(f"Caption generation completed. Text files saved alongside each image.")
+        logger.info("Caption generation completed. Text files saved alongside each image.")
 
 
 def main():
