@@ -9,6 +9,7 @@ from musubi_tuner.frame_pack import hunyuan
 from musubi_tuner.frame_pack.framepack_utils import load_text_encoder1, load_text_encoder2
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
 from blissful_tuner.blissful_logger import BlissfulLogger
+
 logger = BlissfulLogger(__name__, "green")
 
 
@@ -88,7 +89,9 @@ def main():
     )
 
     # remove cache files not in dataset
-    cache_text_encoder_outputs.post_process_cache_files(datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, args.keep_cache)
+    cache_text_encoder_outputs.post_process_cache_files(
+        datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, args.keep_cache
+    )
 
 
 def framepack_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

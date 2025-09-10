@@ -606,9 +606,9 @@ class NetworkTrainer:
             return lr_scheduler
 
         if name.startswith("adafactor"):
-            assert (
-                type(optimizer) == transformers.optimization.Adafactor
-            ), "adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
+            assert type(optimizer) == transformers.optimization.Adafactor, (
+                "adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
+            )
             initial_lr = float(name.split(":")[1])
             # logger.info(f"adafactor scheduler init lr {initial_lr}")
             return wrap_check_needless_num_warmup_steps(transformers.optimization.AdafactorSchedule(optimizer, initial_lr))
@@ -1070,14 +1070,14 @@ class NetworkTrainer:
             max_count = max(sampled_timesteps)
             print(f"Sampled timesteps: max count={max_count}")
             for i, t in enumerate(sampled_timesteps):
-                line = f"{(i)*N_TIMESTEPS_PER_LINE:4d}-{(i+1)*N_TIMESTEPS_PER_LINE-1:4d}: "
+                line = f"{(i) * N_TIMESTEPS_PER_LINE:4d}-{(i + 1) * N_TIMESTEPS_PER_LINE - 1:4d}: "
                 line += "#" * int(t / max_count * CONSOLE_WIDTH)
                 print(line)
 
             max_weighting = max(sampled_weighting)
             print(f"Sampled loss weighting: max weighting={max_weighting}")
             for i, w in enumerate(sampled_weighting):
-                line = f"{i*N_TIMESTEPS_PER_LINE:4d}-{(i+1)*N_TIMESTEPS_PER_LINE-1:4d}: {w:8.2f} "
+                line = f"{i * N_TIMESTEPS_PER_LINE:4d}-{(i + 1) * N_TIMESTEPS_PER_LINE - 1:4d}: {w:8.2f} "
                 line += "#" * int(w / max_weighting * CONSOLE_WIDTH)
                 print(line)
 
@@ -1471,7 +1471,7 @@ class NetworkTrainer:
         # Wrap the inner loop with tqdm to track progress over timesteps
         prompt_idx = sample_parameter.get("enum", 0)
         with torch.no_grad():
-            for i, t in enumerate(tqdm(timesteps, desc=f"Sampling timesteps for prompt {prompt_idx+1}")):
+            for i, t in enumerate(tqdm(timesteps, desc=f"Sampling timesteps for prompt {prompt_idx + 1}")):
                 latents_input = scheduler.scale_model_input(latents, t)
 
                 if do_classifier_free_guidance:
@@ -1547,9 +1547,15 @@ class NetworkTrainer:
         dit_weight_dtype: Optional[torch.dtype],
     ):
         transformer = load_transformer(
-            dit_path, attn_mode, split_attn,
-            loading_device, accelerator.device, dit_weight_dtype,
-            args.dit_in_channels, fp8_scaled=args.fp8_scaled)
+            dit_path,
+            attn_mode,
+            split_attn,
+            loading_device,
+            accelerator.device,
+            dit_weight_dtype,
+            args.dit_in_channels,
+            fp8_scaled=args.fp8_scaled,
+        )
 
         if args.img_in_txt_in_offloading:
             logger.info("Enable offloading img_in and txt_in to CPU")
@@ -1818,7 +1824,7 @@ class NetworkTrainer:
             accelerator.print(f"load network weights from {args.network_weights}: {info}")
 
         if args.gradient_checkpointing:
-            transformer.enable_gradient_checkpointing()
+            transformer.enable_gradient_checkpointing(args.gradient_checkpointing_cpu_offload)
             network.enable_gradient_checkpointing()  # may have no effect
 
         # prepare optimizer, data loader etc.
@@ -1864,16 +1870,16 @@ class NetworkTrainer:
         network_dtype = torch.float32
         args.full_fp16 = args.full_bf16 = False  # temporary disabled because stochastic rounding is not supported yet
         if args.full_fp16:
-            assert (
-                args.mixed_precision == "fp16"
-            ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+            assert args.mixed_precision == "fp16", (
+                "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+            )
             accelerator.print("enable full fp16 training.")
             network_dtype = weight_dtype
             network.to(network_dtype)
         elif args.full_bf16:
-            assert (
-                args.mixed_precision == "bf16"
-            ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+            assert args.mixed_precision == "bf16", (
+                "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+            )
             accelerator.print("enable full bf16 training.")
             network_dtype = weight_dtype
             network.to(network_dtype)
@@ -1967,6 +1973,7 @@ class NetworkTrainer:
             "ss_num_batches_per_epoch": len(train_dataloader),
             "ss_num_epochs": num_train_epochs,
             "ss_gradient_checkpointing": args.gradient_checkpointing,
+            "ss_gradient_checkpointing_cpu_offload": args.gradient_checkpointing_cpu_offload,
             "ss_gradient_accumulation_steps": args.gradient_accumulation_steps,
             "ss_max_train_steps": args.max_train_steps,
             "ss_lr_warmup_steps": args.lr_warmup_steps,
@@ -2130,7 +2137,7 @@ class NetworkTrainer:
         optimizer_train_fn()  # Set training mode
 
         for epoch in range(epoch_to_start, num_train_epochs):
-            accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
+            accelerator.print(f"\nepoch {epoch + 1}/{num_train_epochs}")
             current_epoch.value = epoch + 1
 
             metadata["ss_epoch"] = str(epoch + 1)
@@ -2380,6 +2387,11 @@ def setup_parser_common() -> argparse.ArgumentParser:
         "--gradient_checkpointing", action="store_true", help="enable gradient checkpointing / gradient checkpointingを有効にする"
     )
     parser.add_argument(
+        "--gradient_checkpointing_cpu_offload",
+        action="store_true",
+        help="enable CPU offloading of activation for gradient checkpointing / gradient checkpointing時に活性化のCPUオフロードを有効にする",
+    )
+    parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
         default=1,
@@ -2624,8 +2636,7 @@ def setup_parser_common() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["logit_normal", "mode", "cosmap", "sigma_sqrt", "none"],
-        help="weighting scheme for timestep distribution. Default is none"
-        " / タイムステップ分布の重み付けスキーム、デフォルトはnone",
+        help="weighting scheme for timestep distribution. Default is none / タイムステップ分布の重み付けスキーム、デフォルトはnone",
     )
     parser.add_argument(
         "--logit_mean",
@@ -2889,7 +2900,11 @@ def setup_parser_common() -> argparse.ArgumentParser:
     parser.add_argument("--dit", type=str, help="DiT checkpoint path / DiTのチェックポイントのパス")
     parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
-    parser.add_argument("--fp16_accumulation", action="store_true", help="(Not recommended for training) Enable full FP16 Accmumulation in FP16 GEMMs, requires Pytorch 2.7.0 or higher")
+    parser.add_argument(
+        "--fp16_accumulation",
+        action="store_true",
+        help="(Not recommended for training) Enable full FP16 Accmumulation in FP16 GEMMs, requires Pytorch 2.7.0 or higher",
+    )
     return parser
 
 
@@ -2943,7 +2958,9 @@ def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         " / VAEの空間タイリングを有効にする、デフォルトはFalse。vae_spatial_tile_sample_min_sizeが設定されている場合、自動的に有効になります。",
     )
     parser.add_argument("--vae_chunk_size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
-    parser.add_argument("--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256")
+    parser.add_argument(
+        "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
+    )
     parser.add_argument("--fp8_scaled", action="store_true", help="Scaled FP8 quantization for better accuracy/quality")
     return parser
 

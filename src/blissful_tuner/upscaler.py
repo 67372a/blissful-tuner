@@ -14,17 +14,16 @@ import numpy as np
 from tqdm import tqdm
 from rich.traceback import install as install_rich_tracebacks
 from spandrel import ImageModelDescriptor, ModelLoader
-from blissful_tuner.video_processing_common import BlissfulVideoProcessor, setup_parser_video_common
+from blissful_tuner.video_processing_common import BlissfulVideoProcessor, setup_parser_video_common, get_media_input_list
 from blissful_tuner.utils import setup_compute_context, load_torch_file, BlissfulLogger, power_seed
 from blissful_tuner.swinir.network_swinir import SwinIR
+
 logger = BlissfulLogger(__name__, "#8e00ed")
 install_rich_tracebacks()
 
 
 def upscale_frames_swin(
-    model: torch.nn.Module,
-    frames: List[np.ndarray],
-    VideoProcessor: BlissfulVideoProcessor
+    model: torch.nn.Module, frames: List[np.ndarray], VideoProcessor: BlissfulVideoProcessor
 ) -> List[np.ndarray]:
     """
     Upscale a list of RGB frames using a compiled SwinIR model.
@@ -87,11 +86,11 @@ def load_swin_model(
         embed_dim=240,
         num_heads=[8] * 9,
         mlp_ratio=2,
-        upsampler='nearest+conv',
-        resi_connection='3conv',
+        upsampler="nearest+conv",
+        resi_connection="3conv",
     )
     ckpt = load_torch_file(model_path)
-    key = 'params_ema' if 'params_ema' in ckpt else None
+    key = "params_ema" if "params_ema" in ckpt else None
     model.load_state_dict(ckpt[key] if key else ckpt, strict=True)
     model.to(device, dtype).eval()
     return model
@@ -123,42 +122,40 @@ def main() -> None:
     """
     Parse CLI args, load input, model, and run upscaling pipeline.
     """
-    parser = setup_parser_video_common(description="Video upscaling using SwinIR or ESRGAN models", model_help="Path to model safetensors/pt file e.g. SwinIR.safetensors, 4x_NMKD-Siax_200k.safetensors")
-    parser.add_argument(
-        "--scale", type=float, default=2,
-        help="Final scale multiplier for output resolution"
+    parser = setup_parser_video_common(
+        description="Video upscaling using SwinIR or ESRGAN models",
+        model_help="Path to model safetensors/pt file e.g. SwinIR.safetensors, 4x_NMKD-Siax_200k.safetensors",
     )
-    parser.add_argument(
-        "--mode", choices=["swinir", "esrgan"], default="swinir",
-        help="Model architecture to use"
-    )
+    parser.add_argument("--scale", type=float, default=2, help="Final scale multiplier for output resolution")
+    parser.add_argument("--mode", choices=["swinir", "esrgan"], default="swinir", help="Model architecture to use")
     args = parser.parse_args()
     args.mode = args.mode.lower()
     # Map string → torch.dtype
     device, dtype = setup_compute_context(None, args.dtype)
-    VideoProcessor = BlissfulVideoProcessor(device, dtype)
-    VideoProcessor.prepare_files_and_path(args.input, args.output, args.mode.upper(), overwrite_all=args.yes)
+    master_input = get_media_input_list(args.input, ignore_prompts=args.yes, include_images=True)
+    model = load_swin_model(args.model, device, dtype) if args.mode == "swinir" else load_esrgan_model(args.model, device, dtype)
+    for input_file in master_input:
+        logger.info(f"Processing upscale for {input_file}")
+        VideoProcessor = BlissfulVideoProcessor(device, dtype)
+        VideoProcessor.prepare_files_and_path(input_file, args.output, args.mode.upper(), overwrite_all=args.yes)
 
-    frames, fps, w, h = VideoProcessor.load_frames(make_rgb=True)
-    power_seed(args.seed)
-    # Load and run model
-    if args.mode == "swinir":
-        model = load_swin_model(args.model, device, dtype)
-        upscale_frames_swin(model, frames, VideoProcessor)
-    else:
-        model = load_esrgan_model(args.model, device, dtype)
-        logger.info("Processing with ESRGAN...")
-        for frame in tqdm(frames, desc="Upscaling ESRGAN"):
-            inp = VideoProcessor.np_image_to_tensor(frame)
-            with torch.no_grad():
-                sr = model(inp)
-            VideoProcessor.write_np_or_tensor_to_png(sr)
+        frames, fps, w, h = VideoProcessor.load_frames(make_rgb=True)
+        power_seed(args.seed)
+        # Load and run model
+        if args.mode == "swinir":
+            upscale_frames_swin(model, frames, VideoProcessor)
+        else:
+            for frame in tqdm(frames, desc="Upscaling ESRGAN"):
+                inp = VideoProcessor.np_image_to_tensor(frame)
+                with torch.no_grad():
+                    sr = model(inp)
+                VideoProcessor.write_np_or_tensor_to_png(sr)
 
-    # Write video
-    logger.info("Encoding output video...")
-    out_w, out_h = int(w * args.scale), int(h * args.scale)
-    VideoProcessor.write_buffered_frames_to_output(fps, args.keep_pngs, (out_w, out_h))
-    logger.info("Done!")
+        # Write video
+        logger.info("Encoding output video...")
+        out_w, out_h = int(w * args.scale), int(h * args.scale)
+        VideoProcessor.write_buffered_frames_to_output(fps, args.keep_pngs, (out_w, out_h))
+        del VideoProcessor
 
 
 if __name__ == "__main__":

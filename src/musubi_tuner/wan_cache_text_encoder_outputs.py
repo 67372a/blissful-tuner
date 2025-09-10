@@ -13,6 +13,7 @@ import musubi_tuner.cache_text_encoder_outputs as cache_text_encoder_outputs
 from musubi_tuner.wan.modules.t5 import T5EncoderModel
 
 from blissful_tuner.blissful_logger import BlissfulLogger
+
 logger = BlissfulLogger(__name__, "green")
 
 
@@ -87,7 +88,9 @@ def main():
     del text_encoder
 
     # remove cache files not in dataset
-    cache_text_encoder_outputs.post_process_cache_files(datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, args.keep_cache)
+    cache_text_encoder_outputs.post_process_cache_files(
+        datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, args.keep_cache
+    )
 
 
 def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

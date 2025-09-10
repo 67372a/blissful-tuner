@@ -14,6 +14,7 @@ from safetensors import safe_open
 from tqdm import tqdm
 from rich_argparse import RichHelpFormatter
 from rich.traceback import install as install_rich_tracebacks
+from musubi_tuner.convert_lora import convert_from_diffusers
 from musubi_tuner.qwen_image import qwen_image_model, qwen_image_utils
 from musubi_tuner.qwen_image.qwen_image_autoencoder_kl import AutoencoderKLQwenImage
 from musubi_tuner.qwen_image.qwen_image_utils import VAE_SCALE_FACTOR
@@ -22,8 +23,11 @@ from musubi_tuner.networks import lora_qwen_image
 from musubi_tuner.utils.device_utils import clean_memory_on_device
 from musubi_tuner.hv_generate_video import get_time_flag, save_images_grid, synchronize_device
 from musubi_tuner.wan_generate_video import merge_lora_weights
-
+from blissful_tuner.prompt_management import process_wildcards
+from blissful_tuner.utils import power_seed
 from blissful_tuner.blissful_logger import BlissfulLogger
+from blissful_tuner.blissful_core import add_blissful_qwen_args, parse_blissful_args
+
 logger = BlissfulLogger(__name__, "green")
 lycoris_available = find_spec("lycoris") is not None
 
@@ -124,13 +128,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--no_metadata", action="store_true", help="do not save metadata")
     parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
-    parser.add_argument("--lycoris", action="store_true", help=f"use lycoris for inference{'' if lycoris_available else ' (not available)'}")
+    parser.add_argument(
+        "--lycoris", action="store_true", help=f"use lycoris for inference{'' if lycoris_available else ' (not available)'}"
+    )
 
     # New arguments for batch and interactive modes
     parser.add_argument("--from_file", type=str, default=None, help="Read prompts from a file")
     parser.add_argument("--interactive", action="store_true", help="Interactive mode: read prompts from console")
-
+    parser = add_blissful_qwen_args(parser)
     args = parser.parse_args()
+    args = parse_blissful_args(args)
 
     # Validate arguments
     if args.from_file and args.interactive:
@@ -146,7 +153,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def parse_prompt_line(line: str) -> Dict[str, Any]:
+def parse_prompt_line(line: str, prompt_wildcards: Optional[str] = None) -> Dict[str, Any]:
     """Parse a prompt line into a dictionary of argument overrides
 
     Args:
@@ -158,7 +165,8 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
     # TODO common function with hv_train_network.line_to_prompt_dict
     parts = line.split(" --")
     prompt = parts[0].strip()
-
+    if prompt_wildcards is not None:
+        prompt = process_wildcards(prompt, prompt_wildcards)
     # Create dictionary of overrides
     overrides = {"prompt": prompt}
 
@@ -175,7 +183,7 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
         elif option == "h":
             overrides["image_size_height"] = int(value)
         elif option == "d":
-            overrides["seed"] = int(value)
+            overrides["seed"] = power_seed(value)
         elif option == "s":
             overrides["infer_steps"] = int(value)
         elif option == "g" or option == "l":
@@ -265,6 +273,18 @@ def load_dit_model(
         for lora_weight in args.lora_weight:
             logger.info(f"Loading LoRA weight from: {lora_weight}")
             lora_sd = load_file(lora_weight)  # load on CPU, dtype is as is
+            conversion_needed = False
+            for key, weight in lora_sd.items():
+                prefix, key_body = key.split(".", 1)
+                if prefix == "diffusion_model" or prefix == "transformer":
+                    conversion_needed = True
+                    break
+                elif "lora_unet" in prefix:
+                    conversion_needed = False
+                    break
+            if conversion_needed:
+                logger.info("Converting LoRA from foreign key naming format")
+                lora_sd = convert_from_diffusers("lora_unet_", lora_sd)
             lora_sd = filter_lora_state_dict(lora_sd, args.include_patterns, args.exclude_patterns)
             lora_weights_list.append(lora_sd)
     else:
@@ -273,6 +293,8 @@ def load_dit_model(
     loading_weight_dtype = dit_weight_dtype
     if args.fp8_scaled and not args.lycoris:
         loading_weight_dtype = None  # we will load weights as-is and then optimize to fp8
+    elif args.lycoris:
+        loading_weight_dtype = torch.bfloat16  # lycoris requires bfloat16 or float16, because it merges weights
 
     model = qwen_image_model.load_qwen_image_model(
         device,
@@ -290,7 +312,17 @@ def load_dit_model(
     # merge LoRA weights
     if args.lycoris:
         if args.lora_weight is not None and len(args.lora_weight) > 0:
-            merge_lora_weights(lora_qwen_image, model, args, device)
+            merge_lora_weights(
+                lora_qwen_image,
+                model,
+                args.lora_weight,
+                args.lora_multiplier,
+                args.include_patterns,
+                args.exclude_patterns,
+                device,
+                lycoris=True,
+                save_merged_model=args.save_merged_model,
+            )
 
         if args.fp8_scaled:
             # load state dict as-is and optimize to fp8
@@ -298,7 +330,19 @@ def load_dit_model(
 
             # if no blocks to swap, we can move the weights to GPU after optimization on GPU (omit redundant CPU->GPU copy)
             move_to_device = args.blocks_to_swap == 0  # if blocks_to_swap > 0, we will keep the model on CPU
-            state_dict = model.fp8_optimization(state_dict, device, move_to_device, use_scaled_mm=args.fp8_fast)
+            # state_dict = model.fp8_optimization(state_dict, device, move_to_device, use_scaled_mm=args.fp8_fast)
+
+            from musubi_tuner.modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
+
+            # inplace optimization
+            state_dict = optimize_state_dict_with_fp8(
+                state_dict,
+                device,
+                qwen_image_model.FP8_OPTIMIZATION_TARGET_KEYS,
+                qwen_image_model.FP8_OPTIMIZATION_EXCLUDE_KEYS,
+                move_to_device=move_to_device,
+            )
+            apply_fp8_monkey_patch(model, state_dict, use_scaled_mm=False)  # args.scaled_mm)
 
             info = model.load_state_dict(state_dict, strict=True, assign=True)
             logger.info(f"Loaded FP8 optimized weights: {info}")
@@ -322,20 +366,20 @@ def load_dit_model(
 
         model.to(target_device, target_dtype)  # move and cast  at the same time. this reduces redundant copy operations
 
-    # if args.compile:
-    #     compile_backend, compile_mode, compile_dynamic, compile_fullgraph = args.compile_args
-    #     logger.info(
-    #         f"Torch Compiling[Backend: {compile_backend}; Mode: {compile_mode}; Dynamic: {compile_dynamic}; Fullgraph: {compile_fullgraph}]"
-    #     )
-    #     torch._dynamo.config.cache_size_limit = 32
-    #     for i in range(len(model.blocks)):
-    #         model.blocks[i] = torch.compile(
-    #             model.blocks[i],
-    #             backend=compile_backend,
-    #             mode=compile_mode,
-    #             dynamic=compile_dynamic.lower() in "true",
-    #             fullgraph=compile_fullgraph.lower() in "true",
-    #         )
+    if args.compile:
+        compile_backend, compile_mode, compile_dynamic, compile_fullgraph = args.compile_args
+        logger.info(
+            f"Torch Compiling[Backend: {compile_backend}; Mode: {compile_mode}; Dynamic: {compile_dynamic}; Fullgraph: {compile_fullgraph}]"
+        )
+        torch._dynamo.config.cache_size_limit = 32
+        for i in range(len(model.transformer_blocks)):
+            model.transformer_blocks[i] = torch.compile(
+                model.transformer_blocks[i],
+                backend=compile_backend,
+                mode=compile_mode,
+                dynamic=None if compile_dynamic is None else compile_dynamic.lower() in "true",
+                fullgraph=compile_fullgraph.lower() in "true",
+            )
 
     if args.blocks_to_swap > 0:
         logger.info(f"Enable swap {args.blocks_to_swap} blocks to CPU from device: {device}")

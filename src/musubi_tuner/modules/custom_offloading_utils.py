@@ -138,7 +138,9 @@ class Offloader:
             self.swap_weight_devices(block_to_cpu, block_to_cuda)
 
             if self.debug:
-                print(f"[{self.block_type}] Moved blocks {bidx_to_cpu} and {bidx_to_cuda} in {time.perf_counter()-start_time:.2f}s")
+                print(
+                    f"[{self.block_type}] Moved blocks {bidx_to_cpu} and {bidx_to_cuda} in {time.perf_counter() - start_time:.2f}s"
+                )
             return bidx_to_cpu, bidx_to_cuda  # , event
 
         block_to_cpu = blocks[block_idx_to_cpu]
@@ -162,7 +164,7 @@ class Offloader:
         assert block_idx == bidx_to_cuda, f"Block index mismatch: {block_idx} != {bidx_to_cuda}"
 
         if self.debug:
-            print(f"[{self.block_type}] Waited for block {block_idx}: {time.perf_counter()-start_time:.2f}s")
+            print(f"[{self.block_type}] Waited for block {block_idx}: {time.perf_counter() - start_time:.2f}s")
 
 
 class ModelOffloader(Offloader):
@@ -198,7 +200,7 @@ class ModelOffloader(Offloader):
         self.forward_only = forward_only
 
     def __del__(self):
-        if self.supports_backward:
+        if hasattr(self, "supports_backward") and self.supports_backward:
             for handle in self.remove_handles:
                 handle.remove()
 

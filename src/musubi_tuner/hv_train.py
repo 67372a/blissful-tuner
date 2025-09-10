@@ -45,7 +45,6 @@ from blissful_tuner.blissful_logger import BlissfulLogger
 from musubi_tuner.utils import huggingface_utils, model_utils, train_utils, sai_model_spec, loss_utils
 
 logger = BlissfulLogger(__name__, "green")
- 
 
 
 BASE_MODEL_VERSION_HUNYUAN_VIDEO = "hunyuan_video"
@@ -522,9 +521,9 @@ class FineTuningTrainer:
             return lr_scheduler
 
         if name.startswith("adafactor"):
-            assert (
-                type(optimizer) == transformers.optimization.Adafactor
-            ), "adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
+            assert type(optimizer) == transformers.optimization.Adafactor, (
+                "adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
+            )
             initial_lr = float(name.split(":")[1])
             # logger.info(f"adafactor scheduler init lr {initial_lr}")
             return wrap_check_needless_num_warmup_steps(transformers.optimization.AdafactorSchedule(optimizer, initial_lr))
@@ -871,15 +870,15 @@ class FineTuningTrainer:
         # experimental feature: train the model with gradients in fp16/bf16
         dit_dtype = torch.float32
         if args.full_fp16:
-            assert (
-                args.mixed_precision == "fp16"
-            ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+            assert args.mixed_precision == "fp16", (
+                "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+            )
             accelerator.print("enable full fp16 training.")
             dit_weight_dtype = torch.float16
         elif args.full_bf16:
-            assert (
-                args.mixed_precision == "bf16"
-            ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+            assert args.mixed_precision == "bf16", (
+                "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+            )
             accelerator.print("enable full bf16 training.")
             dit_weight_dtype = torch.bfloat16
         else:
@@ -1013,7 +1012,7 @@ class FineTuningTrainer:
         pos_embed_cache = {}
 
         for epoch in range(epoch_to_start, num_train_epochs):
-            accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
+            accelerator.print(f"\nepoch {epoch + 1}/{num_train_epochs}")
             current_epoch.value = epoch + 1
 
             for step, batch in enumerate(train_dataloader):
@@ -1504,8 +1503,7 @@ def setup_parser() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["logit_normal", "mode", "cosmap", "sigma_sqrt", "none"],
-        help="weighting scheme for timestep distribution. Default is none"
-        " / タイムステップ分布の重み付けスキーム、デフォルトはnone",
+        help="weighting scheme for timestep distribution. Default is none / タイムステップ分布の重み付けスキーム、デフォルトはnone",
     )
     parser.add_argument(
         "--logit_mean",

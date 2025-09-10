@@ -13,6 +13,7 @@ from musubi_tuner.utils import image_utils
 from musubi_tuner.utils.safetensors_utils import load_safetensors
 from musubi_tuner.utils.train_utils import get_lin_function
 from blissful_tuner.blissful_logger import BlissfulLogger
+
 logger = BlissfulLogger(__name__, "green")
 
 CLIP_L_TOKENIZER_ID = "openai/clip-vit-large-patch14"
@@ -98,7 +99,6 @@ def get_schedule(
     max_shift: float = 1.15,
     shift_value: Optional[float] = None,
 ) -> list[float]:
-
     # shifting the schedule to favor high timesteps for higher signal images
     # extra step for zero
     timesteps = torch.linspace(1, 0, num_steps + 1)

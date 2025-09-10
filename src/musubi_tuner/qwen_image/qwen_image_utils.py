@@ -1,5 +1,4 @@
 import json
-import logging
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -16,9 +15,9 @@ from musubi_tuner.flux.flux_utils import is_fp8
 from musubi_tuner.qwen_image.qwen_image_autoencoder_kl import AutoencoderKLQwenImage
 from musubi_tuner.utils import image_utils
 from musubi_tuner.utils.safetensors_utils import load_safetensors, load_split_weights
+from blissful_tuner.blissful_logger import BlissfulLogger
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = BlissfulLogger(__name__, "green")
 
 # region constants
 
@@ -256,7 +255,6 @@ def load_qwen2_5_vl(
                         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
                         **kwargs,
                     ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
-
                         residual = hidden_states
 
                         hidden_states = module.input_layernorm(hidden_states)

@@ -15,7 +15,6 @@ from musubi_tuner.modules.unet_causal_3d_blocks import CausalConv3d, UNetMidBloc
 from blissful_tuner.blissful_logger import BlissfulLogger
 
 logger = BlissfulLogger(__name__, "green")
- 
 
 
 SCALING_FACTOR = 0.476986
@@ -95,6 +94,7 @@ def load_vae(
 
     if vae_path.endswith(".safetensors"):
         from safetensors.torch import load_file
+
         ckpt = load_file(vae_path)
     else:
         ckpt = torch.load(vae_path, map_location=vae.device, weights_only=True)
