@@ -23,7 +23,7 @@ from musubi_tuner.hv_generate_video import get_time_flag, synchronize_device
 from musubi_tuner.wan_generate_video import merge_lora_weights
 from blissful_tuner.latent_preview import LatentPreviewer
 from blissful_tuner.guidance import parse_scheduled_cfg, apply_zerostar_scaling
-from blissful_tuner.prompt_management import process_wildcards
+from blissful_tuner.prompt_management import process_wildcards, MiniT5Wrapper
 from blissful_tuner.common_extensions import prepare_metadata, save_media_advanced
 from blissful_tuner.utils import power_seed
 from blissful_tuner.blissful_core import add_blissful_flux_args, parse_blissful_args
@@ -198,8 +198,8 @@ def parse_prompt_line(line: str, prompt_wildcards: Optional[str] = None) -> Dict
         #     overrides["image_mask_path"] = value
         # elif option == "cn":
         #     overrides["control_path"] = value
-        # elif option == "n":
-        #     overrides["negative_prompt"] = value
+        elif option == "n":
+            overrides["negative_prompt"] = value
         elif option == "ci":  # control_image_path
             overrides["control_image_path"] = value
         elif option == "cs":
@@ -408,6 +408,7 @@ def prepare_text_inputs(
     # load text encoder: conds_cache holds cached encodings for prompts without padding
     conds_cache = {}
     t_device = device if not args.fp32_cpu_te else torch.device("cpu")
+    t_dtype = torch.float8_e4m3fn if args.fp8_t5 else torch.float32 if args.fp32_cpu_te else torch.bfloat16
     if shared_models is not None:
         tokenizer1, text_encoder1 = shared_models.get("tokenizer1"), shared_models.get("text_encoder1")
         tokenizer2, text_encoder2 = shared_models.get("tokenizer2"), shared_models.get("text_encoder2")
@@ -416,7 +417,6 @@ def prepare_text_inputs(
         # text_encoder1 and text_encoder2 are on device (batched inference) or CPU (interactive inference)
     else:  # Load if not in shared_models
         # T5XXL is float16 by default, but it causes NaN values in some cases, so we use bfloat16 (or fp8 if specified)
-        t_dtype = torch.float8_e4m3fn if args.fp8_t5 else torch.float32 if args.fp32_cpu_te else torch.bfloat16
         tokenizer1, text_encoder1 = flux_utils.load_t5xxl(args.text_encoder1, dtype=t_dtype, device=t_device, disable_mmap=True)
         tokenizer2, text_encoder2 = flux_utils.load_clip_l(args.text_encoder2, dtype=t_dtype, device=t_device, disable_mmap=True)
 
@@ -455,29 +455,31 @@ def prepare_text_inputs(
         text_encoder2.to(t_device)
 
     prompt = args.prompt
+    blissful_text_encoder = MiniT5Wrapper(
+        device, t_dtype, t5=text_encoder1, tokenizer=tokenizer1, mode="flux"
+    )  # Wrap it for weighting
     if prompt in conds_cache:
         t5_vec, clip_l_pooler = conds_cache[prompt]
     else:
         move_models_to_device_if_needed()
-
-        t5_tokens = tokenizer1(
-            prompt,
-            max_length=flux_models.T5XXL_MAX_LENGTH,
-            padding="max_length",
-            return_length=False,
-            return_overflowing_tokens=False,
-            truncation=True,
-            return_tensors="pt",
-        )["input_ids"]
+        # =============================================================================
+        #         t5_tokens = tokenizer1(
+        #             prompt,
+        #             max_length=flux_models.T5XXL_MAX_LENGTH,
+        #             padding="max_length",
+        #             return_length=False,
+        #             return_overflowing_tokens=False,
+        #             truncation=True,
+        #             return_tensors="pt",
+        #         )["input_ids"]
+        # =============================================================================
         l_tokens = tokenizer2(prompt, max_length=77, padding="max_length", truncation=True, return_tensors="pt")["input_ids"]
 
         with (
             torch.autocast(device_type=t_device.type, dtype=text_encoder1.dtype) if not args.fp32_cpu_te else nullcontext(),
             torch.no_grad(),
         ):
-            t5_vec = text_encoder1(input_ids=t5_tokens.to(text_encoder1.device), attention_mask=None, output_hidden_states=False)[
-                "last_hidden_state"
-            ]
+            t5_vec = blissful_text_encoder(prompt, t_device)
             assert torch.isnan(t5_vec).any() == False, "T5 vector contains NaN values"  # NoQA tensor is not bool
             t5_vec = t5_vec.cpu()
 
@@ -498,15 +500,17 @@ def prepare_text_inputs(
         else:
             move_models_to_device_if_needed()
 
-            neg_t5_tokens = tokenizer1(
-                neg_prompt,
-                max_length=flux_models.T5XXL_MAX_LENGTH,
-                padding="max_length",
-                return_length=False,
-                return_overflowing_tokens=False,
-                truncation=True,
-                return_tensors="pt",
-            )["input_ids"]
+            # =============================================================================
+            #             neg_t5_tokens = tokenizer1(
+            #                 neg_prompt,
+            #                 max_length=flux_models.T5XXL_MAX_LENGTH,
+            #                 padding="max_length",
+            #                 return_length=False,
+            #                 return_overflowing_tokens=False,
+            #                 truncation=True,
+            #                 return_tensors="pt",
+            #             )["input_ids"]
+            # =============================================================================
             neg_l_tokens = tokenizer2(neg_prompt, max_length=77, padding="max_length", truncation=True, return_tensors="pt")[
                 "input_ids"
             ]
@@ -515,9 +519,7 @@ def prepare_text_inputs(
                 torch.autocast(device_type=t_device.type, dtype=text_encoder1.dtype) if not args.fp32_cpu_te else nullcontext(),
                 torch.no_grad(),
             ):
-                neg_t5_vec = text_encoder1(
-                    input_ids=neg_t5_tokens.to(text_encoder1.device), attention_mask=None, output_hidden_states=False
-                )["last_hidden_state"]
+                neg_t5_vec = blissful_text_encoder(neg_prompt, t_device)
                 assert torch.isnan(neg_t5_vec).any() == False, "T5 vector contains NaN values"  # NoQA
                 neg_t5_vec = neg_t5_vec.cpu()
 
@@ -672,7 +674,6 @@ def generate(
     #     mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
     #     mask_image = mask_image.to(torch.float32)
     #     return mask_image
-
     logger.info(f"Prompt: {context['prompt']}")
     working_dtype = torch.bfloat16 if not args.fp32_working_dtype else torch.float32
     logger.info(f"Working dtype is {working_dtype}")
@@ -716,15 +717,16 @@ def generate(
         control_latent_ids = None
     # denoise
 
-    if args.scheduler == "dpm++":
-        logger.info("Using FlowDPMSolverMultistepScheduler")
+    if "dpm++" in args.scheduler:
+        logger.info(f"Using FlowDPMSolverMultistepScheduler{', SDE variant' if 'sde' in args.scheduler else ''}")
         mu = (
             flux_utils.get_lin_function(y1=0.5, y2=1.15)(packed_latent_height * packed_latent_width)
             if args.flow_shift is None
             else None
         )
         scheduler = FlowDPMSolverMultistepScheduler(
-            use_dynamic_shifting=True if args.flow_shift is None else False, algorithm_type="dpmsolver++"
+            use_dynamic_shifting=True if args.flow_shift is None else False,
+            algorithm_type="dpmsolver++" if "sde" not in args.scheduler else "sde-dpmsolver++",
         )
         scheduler.set_timesteps(args.infer_steps, device=device, shift=args.flow_shift, mu=mu)
         timesteps = scheduler.timesteps
@@ -772,7 +774,6 @@ def generate(
         if control_latent is not None:
             img_input = torch.cat((img_input, control_latent), dim=1)
             img_input_ids = torch.cat((img_input_ids, control_latent_ids), dim=1)
-
         with torch.no_grad(), dtype_context:
             pred = model(
                 img=img_input,
@@ -808,7 +809,7 @@ def generate(
 
         if i + 1 <= args.cfgzerostar_init_steps:  # Do zero init? User provides init_steps as 1 based but i is 0 based
             pred *= args.cfgzerostar_multiplier
-        if args.scheduler == "dpm++":
+        if "dpm++" in args.scheduler:
             x = scheduler.step(pred, float(timesteps[i]), x, return_dict=False)[0]
         elif args.scheduler == "euler":
             t_prev = sigmas[1:][i]

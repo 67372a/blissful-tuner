@@ -33,7 +33,7 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 - 高品質かつ低ステップの蒸留サンプリング（https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill のような蒸留Wanモデル/LoRAで`--sample_solver lcm`または`--sample_solver dpm++sde`を使用します。さらに、便利なLoRAも作成しました: https://huggingface.co/Blyss/BlissfulModels/tree/main/wan_lcm ）(WV)
 - V2V推論（`--video_path /path/to/input/video --denoise_strength amount`。amountは0.0～1.0の浮動小数点数で、ソースビデオに追加するノイズの強度を制御します。`--noise_mode Traditional`の場合、他の実装と同様に、タイムステップスケジュールの最後の（amount * 100）パーセントを実行します。`--noise_mode direct`の場合、タイムステップスケジュール内でその値に最も近いところから開始し、そこから処理を進めることで、追加されるノイズの量を可能な限り正確に制御します。スケーリング、パディング、切り捨てをサポートしているため、入力は出力と同じ解像度や長さである必要はありません。`--video_length` が入力より短い場合、入力は切り捨てられ、最初の `--video_length` フレームのみが含まれます。`--video_length` が入力より長い場合、`--v2v_pad_mode` に応じて最初のフレームまたは最後のフレームが繰り返され、長さがパディングされます。T2V または I2V の `--task` モードとモデルを使用できます (i2v モードの方が品質が高いと思います)。I2V モードでは、`--image_path` が指定されていない場合、代わりにビデオの最初のフレームがモデルの調整に使用されます。`--infer_steps` は、完全なノイズ除去の場合と同じ量である必要があります (例: デフォルト)。 T2Vの場合は50、I2Vの場合は40です。これは、フルスケジュールから変更する必要があるためです。実際の手順は`--noise_mode`に依存します。(WV)
 - I2I推論 (`--i2i_path /path/to/image` - T2IモードでT2Vモデルを使用する場合、`--denoise_strength`で強度を指定します。潜在ノイズの増強には`--i2_extra_noise`もサポートされています。) (WV)
-- プロンプトの重み付け (`--prompt_weighting`を使用し、プロンプトで「(large:1.4)の赤いボールで遊ぶ猫」のように記述することで、「large」の効果を強調できます。[this]や(this)はサポートされておらず、(this:1.0)のみがサポートされています。(WV)
+- プロンプトの重み付け (`--prompt_weighting`を使用し、プロンプトで「(large:1.4)の赤いボールで遊ぶ猫」のように記述することで、「large」の効果を強調できます。[this]や(this)はサポートされておらず、(this:1.0)のみがサポートされています。(WV) (FX)
 - 複素数を使用しないComfyUIから移植されたROPE。推論または`--compile`と併用すると、VRAMを大幅に節約できます。学習には `--optimized_compile` を使用してください！(`--rope_func comfy`) (WV) (T)
 - I2V/V2V/I2I 用のオプションの潜在ノイズ (`--v2_extra_noise 0.02 --i2_extra_noise 0.02`、0.04 未満の値を推奨。これにより、細かいディテールやテクスチャが向上しますが、値が大きすぎるとアーティファクトや影の動きが発生します。私は V2V の場合は 0.01～0.02、I2V の場合は 0.02～0.04 程度を使用しています) (WV)
 - 混合精度トランスフォーマーをロードします (推論または学習には `--mixed_precision_transformer` を使用します。このようなトランスフォーマーの作成方法と、その理由については https://github.com/kohya-ss/musubi-tuner/discussions/232#discussioncomment-13284677 を参照してください) (WV) (T)
@@ -118,9 +118,14 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 
 GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- 2025/09/13
+    - `wan_generate_video.py` のFLF2V推論でマスクが誤っていた不具合が修正されました。[PR #548](https://github.com/kohya-ss/musubi-tuner/pull/548) LittleNyima 氏に感謝します。
+    - `.safetensors`ファイルの読み込みを高速化しました。[PR #556](https://github.com/kohya-ss/musubi-tuner/pull/556)
+        - モデルの読み込みが最大で1.5倍ほど高速化されます。
+
 - 2025/09/08
     - ruffによるコード解析を導入しました。またコントリビューションのガイドライン（[英語版](./CONTRIBUTING.md)と[日本語版](./CONTRIBUTING.ja.md)）を追加しました。
-        - [Issue #524](https://github.com/kohya-ss/musubi-tuner/issues/524) および [PR 538](https://github.com/kohya-ss/musubi-tuner/pull/538)　arledesma氏に深く感謝します。
+        - [Issue #524](https://github.com/kohya-ss/musubi-tuner/issues/524) および [PR #538](https://github.com/kohya-ss/musubi-tuner/pull/538)　arledesma氏に深く感謝します。
     - ActivationのCPU offloadingを追加しました。[PR #537](https://github.com/kohya-ss/musubi-tuner/pull/537)
         - block swapと組み合わせて使用することも可能です。
         - 特に長い動画や大きなバッチサイズで学習する際に、VRAMの使用量を削減できます。block swapと組み合わせることでこれらの学習が可能になる場合があります。
@@ -141,21 +146,6 @@ GitHub Discussionsを有効にしました。コミュニティのQ&A、知識�
     - コードの貢献をいただく際は、`ruff check`を実行してコードスタイルを確認していただけると助かります。`ruff --fix`で自動修正も可能です。
         - なおコードの整形はblackで行うか、ruffのblack互換フォーマットを使い、`line-length`を`132`に設定してください。
         - ガイドライン等をのちほど整備する予定です。
-    
-- 2025/08/28
-    - RTX 50シリーズのGPUをお使いの場合、PyTorch 2.8.0をお試しください。
-    - ライブラリの依存関係を更新し、`bitsandbytes`からバージョン指定を外しました。環境に応じた適切なバージョンをインストールしてください。
-        - RTX 50シリーズのGPUを使用している場合は、`pip install -U bitsandbytes`で最新バージョンをインストールするとエラーが解消されます。
-        - `sentencepiece`を0.2.1に更新しました。
-    - [Schedule Free Optimizer](https://github.com/facebookresearch/schedule_free)をサポートしました。PR [#505](https://github.com/kohya-ss/musubi-tuner/pull/505) am7coffee氏に感謝します。
-        - [Schedule Free Optimizerのドキュメント](./docs/advanced_config.md#schedule-free-optimizer--スケジュールフリーオプティマイザ)を参照してください。
-
-- 2025/08/24
-    - Wan2.1/2.2の学習、推論時のピークメモリ使用量を削減しました。PR [#493](https://github.com/kohya-ss/musubi-tuner/pull/493) 動画のフレームサイズ、フレーム数にもよりますが重み以外のメモリ使用量が10%程度削減される可能性があります。
-
-- 2025/08/22
-    - Qwen-Image-Editに対応しました。PR [#473](https://github.com/kohya-ss/musubi-tuner/pull/473) 詳細は[Qwen-Imageのドキュメント](./docs/qwen_image.md)を参照してください。変更が多岐に渡るため既存機能へ影響がある可能性があります。不具合が発生した場合は、[Issues](https://github.com/kohya-ss/musubi-tuner/issues)でご報告ください。
-    - **破壊的変更**: この変更に伴いFLUX.1 Kontextのキャッシュフォーマットが変更されました。Latentキャッシュを再作成してください。
 
 ### リリースについて
 

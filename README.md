@@ -31,7 +31,7 @@ Blissful Features:
 - Distilled sampling with high quality and low steps (Use `--sample_solver lcm` or `--sample_solver dpm++sde` with distilled Wan models/LoRA like [lightx2v's](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill) or with the base model and [my convenient LoRA](https://huggingface.co/Blyss/BlissfulModels/tree/main/wan_lcm)) (WV)
 - V2V inferencing (`--video_path /path/to/input/video --denoise_strength amount` where amount is a float 0.0 - 1.0 that controls how strong the noise added to the source video will be. If `--noise_mode traditional` then it will run the last (amount * 100) percent of the timestep schedule like other implementations. If `--noise_mode direct` it will directly control the amount of noise added as closely as possible by starting from wherever in the timestep schedule is closest to that value and proceeding from there. Supports scaling, padding, and truncation so the input doesn't have to be the same res as the output or even the same length! If `--video_length` is shorter than the input, the input will be truncated and include only the first `--video_length` frames. If `--video_length` is longer than the input, the first frame or last frame will be repeated to pad the length depending on `--v2v_pad_mode`. You can use either T2V or I2V `--task` modes and models(i2v mode produces better quality in my opinion)! In I2V mode, if `--image_path` is not specified, the first frame of the video will be used to condition the model instead. `--infer_steps` should be the same amount it would for a full denoise e.g. by default 50 for T2V or 40 for I2V because we need to modify from a full schedule. Actual steps will depend on `--noise_mode`) (WV)
 - I2I inferencing (`--i2i_path /path/to/image` - use with T2V model in T2I mode, specify strength with `--denoise_strength`. Supports `--i2_extra_noise` for latent noise augmentation as well) (WV)
-- Prompt weighting (`--prompt_weighting` and then in your prompt you can do like "a cat playing with a (large:1.4) red ball" to upweight the effect of "large". Note that [this] or (this) isn't supported, only (this:1.0) (WV)
+- Prompt weighting (`--prompt_weighting` and then in your prompt you can do like "a cat playing with a (large:1.4) red ball" to upweight the effect of "large". Note that [this] or (this) isn't supported, only (this:1.0) (WV) (FX)
 - ROPE ported from ComfyUI that doesn't use complex numbers. Massive VRAM savings when used with `--compile` for inference or `--optimized_compile` for training! (`--rope_func comfy`) (WV) (T)
 - Optional extra latent noise for I2V/V2V/I2I (`--v2_extra_noise 0.02 --i2_extra_noise 0.02`, values less than 0.04 are recommended. This can improve fine detail and texture in but too much will cause artifacts and moving shadows. I use around 0.01-0.02 for V2V and 0.02-0.04 for I2V) (WV)
 - Load mixed precision transformers (`--mixed_precision_transformer` for inference or training, see [here](https://github.com/kohya-ss/musubi-tuner/discussions/232#discussioncomment-13284677) for how to create such a transformer and why you might wanna) (WV) (T)
@@ -120,6 +120,11 @@ If you find this project helpful, please consider supporting its development via
 
 GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- September 13, 2025
+    - A bug in masking during FLF2V inference in `wan_generate_video.py` has been fixed. Thanks to LittleNyima for [PR #548](https://github.com/kohya-ss/musubi-tuner/pull/548).
+    - The loading speed of `.safetensors` files has been improved. See [PR #556](https://github.com/kohya-ss/musubi-tuner/pull/556).
+        - Model loading can be up to 1.5 times faster.
+
 - September 8, 2025
     - Code analysis with ruff has been introduced, and [contribution guidelines](./CONTRIBUTING.md) have been added.
         - Thanks to arledesma for [Issue #524](https://github.com/kohya-ss/musubi-tuner/issues/524) and [PR #538](https://github.com/kohya-ss/musubi-tuner/pull/538).
@@ -143,21 +148,6 @@ GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, 
     - When contributing code, it would be helpful if you could run `ruff check` to verify the code style. Automatic fixes are also possible with `ruff --fix`.
         - Note that code formatting should be done with `black`, and the `line-length` should be set to `132`.
         - Guidelines will be developed later.
-
-- August 28, 2025
-    - If you are using an RTX 50 series GPU, please try PyTorch 2.8.0.
-    - Library dependencies have been updated, and version specifications have been removed from `bitsandbytes`. Please install the appropriate version according to your environment.
-        - If you are using an RTX 50 series GPU, installing the latest version with `pip install -U bitsandbytes` will resolve the error.
-        - `sentencepiece` has been updated to 0.2.1.
-    - [Schedule Free Optimizer](https://github.com/facebookresearch/schedule_free) is supported. Thanks to am7coffee for [PR #505](https://github.com/kohya-ss/musubi-tuner/pull/505). 
-        - See [Schedule Free Optimizer documentation](./docs/advanced_config.md#schedule-free-optimizer--スケジュールフリーオプティマイザ) for details.
-
-- August 24, 2025
-    - Reduced peak memory usage during training and inference for Wan2.1/2.2. PR [#493](https://github.com/kohya-ss/musubi-tuner/pull/493) This may reduce memory usage by about 10% for non-weight tensors, depending on the video frame size and number of frames.
-
-- August 22, 2025:
-    - Qwen-Image-Edit support has been added. See PR [#473](https://github.com/kohya-ss/musubi-tuner/pull/473) and the [Qwen-Image documentation](./docs/qwen_image.md) for details. This change may affect existing features due to its extensive nature. If you encounter any issues, please report them in the [Issues](https://github.com/kohya-ss/musubi-tuner/issues).
-    - **Breaking Change**: The cache format for FLUX.1 Kontext has been changed with this update. Please recreate the latent cache.
 
 ### Releases
 
