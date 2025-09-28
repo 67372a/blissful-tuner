@@ -6,6 +6,8 @@ Blissful extension of Musubi Tuner by Blyss Sarania
 
 Here you will find an extended version of Musubi Tuner with advanced and experimental features focused on creating a full suite of tools for working with generative video models. Preview videos as they generate, increase inference speed, make longer videos and gain more control over your creations and enhance them with VFI, upscaling and more! If you wanna get even more out of Musubi then you've come to the right place! Note for best performance and compatibility, Python 3.12 with PyTorch 2.7.0 or later is recommended! While development is done in Python 3.12, efforts are made to maintain compatibility back to 3.10 as well.
 
+IMPORTANT NOTE: Please only install either regular Musubi Tuner or Blissful Tuner into the same venv and uninstall the existing one (e.g. `pip uninstall blissful-tuner`) when switching between Musubi and Blissful. Blissful Tuner is built directly on top of Musubi Tuner and shares many files with it, switching without this step can cause many issues. Thanks!
+
 Super epic thanks to kohya-ss for his tireless work on Musubi Tuner, kijai for HunyuanVideoWrapper and WanVideoWrapper from which significant code is ported, and all other devs in the open source generative AI community! Please note that due to the experimental nature of many changes, some things might not work as well as the unmodified Musubi! If you find any issues please let me know and I'll do my best to fix them. Please do not post about issues with this version on the main Musubi Github repo but rather use this repo's issues section!
 
 In order to keep this section maintainable as the project grows, each feature will be listed once along with a legend indicating which models in the project currently support that feature. Most features pertain to inference, if a feature is available for training that will be specifically noted. Many smaller optimizations and features too numerous to list have been done as well. For the latest updates, I maintain something of a devlog [here](https://github.com/kohya-ss/musubi-tuner/discussions/232)
@@ -22,7 +24,7 @@ Blissful Features:
 - Optimized generation settings for fast, high quality gens* (`--optimized`\*, enables various optimizations and settings based on the model. Requires SageAttention, Triton, PyTorch 2.7.0 or higher) (HY) (WV) (FP) (FX)
 - FP16 accumulation (`--fp16_accumulation`, works best with Wan FP16 models(but works with Hunyaun bf16 too!) and requires PyTorch 2.7.0 or higher but significantly accelerates inference speeds, especially with `--compile`\* it's almost as fast as fp8_fast/mmscaled without the loss of precision! And it works with fp8 scaled mode too!) (HY) (WV) (FP) (FX)
 - Extended saving options (`--codec codec --container container`, can save Apple ProRes(`--codec prores`, super high bitrate perceptually lossless) into `--container mkv`, or either of `h264`, `h265` into `mp4` or `mkv`)  (HY) (WV) (FP)
-- Save generation metadata in videos/images (automatic with `--container mkv` and when saving PNG, disable with `--no-metadata`, not available with `--container mp4` You can conveniently view/copy such metadata with `src/blissful_tuner/metaview.py some_video.mkv`, the viewer requires mediainfo_cli) (HY) (WV) (FP)
+- Save generation metadata in videos/images (automatic with `--container mkv` and when saving PNG, disable with `--no-metadata`, not available with `--container mp4` You can conveniently view/copy such metadata with `src/blissful_tuner/metaview.py some_video.mkv`, the viewer requires mediainfo_cli) (HY) (WV) (FP) (FX)
 - [CFGZero*](https://github.com/WeichenFan/CFG-Zero-star) (`--cfgzerostar_scaling --cfgzerostar_init_steps N` where N is the total number of steps to 0 out at the start. 2 is good for T2V, 1 for I2V but it's better for T2V in my experience. Support for Hunyuan is HIGHLY experimental and only available with CFG enabled.) (HY) (WV) (FX)
 - Advanced CFG scheduling: (`--cfg_schedule`, please see the `--help` for usage. Can specify guidance scale down to individual steps if you like!) (HY) (WV) (FX)
 - [RifleX](https://github.com/thu-ml/RIFLEx) for longer vids (`--riflex_index N` where N is the RifleX frequency. 6 is good for Wan, can usually go to ~115 frames instead of just 81, requires `--rope_func comfy` with Wan; 4 is good for Hunyuan and you can make at least double length!) (HY) (WV)
@@ -122,6 +124,23 @@ If you find this project helpful, please consider supporting its development via
 
 GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- September 28, 2025
+    - Support for training and inference of [Qwen-Image-Edit-2509](https://github.com/QwenLM/Qwen-Image) has been added. See [PR #590](https://github.com/kohya-ss/musubi-tuner/pull/590) for details. Please refer to the [Qwen-Image documentation](./docs/qwen_image.md) for more information.
+        - Multiple control images can be used simultaneously. While the official Qwen-Image-Edit-2509 supports up to 3 images, Musubi Tuner allows specifying any number of images (though correct operation is confirmed only up to 3).
+        - Different weights for the DiT model are required, and the `--edit_plus` option has been added to the caching, training, and inference scripts.
+
+- September 24, 2025
+    - Added `--force_v2_1_time_embedding` option to Wan2.2 LoRA training and inference scripts. See [PR #586](https://github.com/kohya-ss/musubi-tuner/pull/586) This option can reduce VRAM usage. See [Wan documentation](./docs/wan.md#training--学習) for details.
+    
+- September 23, 2025
+    - The method of quantization when the `--fp8_scaled` option is specified has been changed from per-tensor to block-wise scaling. See [PR #575](https://github.com/kohya-ss/musubi-tuner/pull/575) [Discussion #564](https://github.com/kohya-ss/musubi-tuner/discussions/564) for more details.
+        - This improves the accuracy of FP8 quantization, leading to more stable training and improved inference accuracy for each model (except HunyuanVideo). Training and inference speed may decrease slightly.
+        - For LoRA training of Qwen-Image, the required VRAM for training is reduced by about 5GB due to a review of the quantized modules.
+        - See [Advanced Configuration documentation](./docs/advanced_config.md#fp8-weight-optimization-for-models--モデルの重みのfp8への最適化) for details.
+
+- September 22, 2025
+    - A bug in FramePack where VAE was forcibly set to tiling has been fixed. Tiling is now enabled by specifying the `--vae_tiling` option or by setting `--vae_spatial_tile_sample_min_size`. See [PR #583](https://github.com/kohya-ss/musubi-tuner/pull/583)
+
 - September 20, 2025
     - A bug in `qwen_image_generate_image.py` where generation with `--from_file` did not work has been fixed. Thanks to nmfisher for [PR #553](https://github.com/kohya-ss/musubi-tuner/pull/553). Followed by [PR #557](https://github.com/kohya-ss/musubi-tuner/pull/557).
         - Additionally, the `--append_original_name` option has been added to the same script. This appends the base name of the original image to the output file name during editing.
@@ -142,22 +161,6 @@ GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, 
         - This can be used in combination with block swap.
         - This can reduce VRAM usage, especially when training long videos or large batch sizes. Combining it with block swap may enable training that was previously not possible.
         - See the PR and [HunyuanVideo documentation](./docs/hunyuan_video.md#memory-optimization) for details.
-
-- September 6, 2025
-    - A new LR scheduler, Rex, has been added. Thanks to xzuyn for [PR #513](https://github.com/kohya-ss/musubi-tuner/pull/513).
-        - Similar to the Polynomial Scheduler with power set to less than 1, Rex has a more gradual decrease in learning rate.
-        - See [Advanced Configuration documentation](./docs/advanced_config.md#rex) for details.
-        
-- September 2, 2025 (update)
-    - Fine-tuning for Qwen-Image has been added. See [PR #492](https://github.com/kohya-ss/musubi-tuner/pull/492).
-        - This trains the entire model rather than just the LoRA layers. See the [finetuning section of the Qwen-Image documentation](./docs/qwen_image.md#finetuning) for details.
-
-- September 2, 2025
-    - Code analysis with ruff has been introduced. Thanks to arledesma for [PR #483](https://github.com/kohya-ss/musubi-tuner/pull/483) and [PR #488](https://github.com/kohya-ss/musubi-tuner/pull/488).
-        - ruff is a Python code analysis and formatting tool.
-    - When contributing code, it would be helpful if you could run `ruff check` to verify the code style. Automatic fixes are also possible with `ruff --fix`.
-        - Note that code formatting should be done with `black`, and the `line-length` should be set to `132`.
-        - Guidelines will be developed later.
 
 ### Releases
 

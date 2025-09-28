@@ -8,6 +8,8 @@ Blyss Sarania による Musubi Tuner の Blissful な拡張機能
 
 ここでは、生成動画モデルを扱うためのツールスイートの作成に重点を置いた、高度で実験的な機能を備えたMusubi Tunerの拡張バージョンをご覧いただけます。動画生成時にプレビューしたり、推論速度を向上させたり、動画を長くしたり、作成した動画をより細かく制御したり、VFIやアップスケーリングなどで動画を強化したりできます。Musubiをさらに活用したい方は、ぜひこの機会にお試しください。最適なパフォーマンスと互換性を得るには、Python 3.12とPyTorch 2.7.0以降を推奨します。「requirements.txt」に追加の要件が追加されているため、通常のMusubiから移行する場合は、再度`pip install -r requirements.txt`を実行する必要があります。開発はPython 3.12で行われていますが、3.10との互換性も維持するよう努めています。
 
+重要事項：MusubiとBlissfulを切り替える際は、同じvenvに通常のMusubi TunerまたはBlissful Tunerのいずれか一方のみをインストールし、既存のものをアンインストールしてください（例：`pip uninstall blissful-tuner`）。Blissful TunerはMusubi Tunerの上に直接構築されており、多くのファイルを共有しています。この手順を踏まずに切り替えると、多くの問題が発生する可能性があります。よろしくお願いいたします。
+
 Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコードを移植したHunyuanVideoWrapperとWanVideoWrapperを開発してくださったkijaiさん、そしてオープンソース生成AIコミュニティの開発者の皆様に心より感謝申し上げます。多くの変更は実験的なものであるため、修正前のMusubiと同じように動作しない部分もあることをご了承ください。何か問題が見つかった場合はお知らせください。できる限り修正いたします。このバージョンに関する問題は、MusubiのメインGithubリポジトリではなく、このリポジトリのIssuesセクションに投稿してください。
 
 プロジェクトの拡大に​​合わせてこのセクションをメンテナンスしやすくするため、各機能は一度だけリストアップし、プロジェクト内のどのモデルが現在その機能をサポートしているかを示す凡例も表示します。ほとんどの機能は推論に関するもので、トレーニングに利用可能な機能がある場合は特に明記します。また、記載しきれないほど多くの小さな最適化や機能追加も実施しました。最新のアップデートについては、[こちら](https://github.com/kohya-ss/musubi-tuner/discussions/232) で開発ログのようなものを公開しています。
@@ -24,7 +26,7 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 - 高速で高品質な生成のために最適化された生成設定（`--optimized`\*、モデルに基づいてさまざまな最適化と設定を有効にします。SageAttention、Triton、PyTorch 2.7.0以降が必要です）(HY) (WV) (FP) (FX)
 - FP16 積分 (`--fp16_accumulation`、Wan FP16 モデルで最も効果的に機能します (Hunyaun bf16 でも動作します!)。PyTorch 2.7.0 以上が必要ですが、推論速度が大幅に向上します。特に `--compile`\* を使用すると、精度を損なうことなく fp8_fast/mmscaled とほぼ同等の速度を実現できます。また、fp8 スケールモードでも動作します!) (HY) (WV) (FP) (FX)
 - 拡張保存オプション (`--codec codec --container container`、Apple ProRes (`--codec prores`、超高ビットレートで知覚的にロスレス) を `--container mkv` に保存、または `h264`、`h265` のいずれかを `mp4` または `mkv` に保存可能) (HY) (WV) (FP)
-- 生成メタデータを動画/画像に保存 (自動`--container mkv` を使用し、PNG 保存時は `--no-metadata` で無効にしてください。`--container mp4` では無効です。こうしたメタデータは `src/blissful_tuner/metaview.py some_video.mkv` で簡単に表示/コピーできます。ビューアには mediainfo_cli が必要です) (HY) (WV) (FP)
+- 生成メタデータを動画/画像に保存 (自動`--container mkv` を使用し、PNG 保存時は `--no-metadata` で無効にしてください。`--container mp4` では無効です。こうしたメタデータは `src/blissful_tuner/metaview.py some_video.mkv` で簡単に表示/コピーできます。ビューアには mediainfo_cli が必要です) (HY) (WV) (FP) (FX)
 - CFGZero* 例: https://github.com/WeichenFan/CFG-Zero-star (`--cfgzerostar_scaling --cfgzerostar_init_steps N` で、N は開始時に 0 になるまでのステップ数です。T2V の場合は 2、I2V の場合は 1 が適切ですが、私の経験では T2V の方が適しています。Hunyuan のサポートは非​​常に実験的であり、CFG が有効になっている場合にのみ利用可能です。) (HY) (WV) (FX)
 - 高度な CFG スケジューリング: (`--cfg_schedule`、使用方法については `--help` を参照してください。必要に応じて、個々のステップにガイダンススケールダウンを指定することもできます!) (HY) (WV) (FX)
 - RifleX 例:より長い動画の場合は https://github.com/thu-ml/RIFLEx をご覧ください (`--riflex_index N`、N は RifleX の周波数です。Wan の場合は 6 が適しており、通常 81 フレームではなく約 115 フレームまで再生できます。Wan の場合は `--rope_func comfy` が必要です。Hunyuan の場合は 4 が適しており、少なくとも 2 倍の長さにできます!) (HY) (WV)
@@ -120,6 +122,23 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 
 GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- 2025/09/28
+    - [Qwen-Image-Edit-2509](https://github.com/QwenLM/Qwen-Image)の学習、推論に対応しました。[PR #590](https://github.com/kohya-ss/musubi-tuner/pull/590) 詳細は[Qwen-Imageのドキュメント](./docs/qwen_image.md)を参照してください。
+        - 複数枚の制御画像を同時に使用できます。Qwen-Image-Edit-2509公式では3枚までですが、Musubi Tunerでは任意の枚数を指定できます（正しく動作するのは3枚までです）。
+        - DiTモデルの重みが異なるほか、キャッシュ、学習、推論の各スクリプトに、`--edit_plus`オプションが追加されています。
+
+- 2025/09/24
+    - Wan2.2のLoRA学習および推論スクリプトに`--force_v2_1_time_embedding`オプションを追加しました。[PR #586](https://github.com/kohya-ss/musubi-tuner/pull/586) このオプションを指定することでVRAM使用量を削減できます。詳細は[Wanのドキュメント](./docs/wan.md#training--学習)を参照してください。
+    
+- 2025/09/23
+    - `--fp8_scaled`オプションを指定した時の量子化方法を、per-tensorからblock-wise scalingに変更しました。[PR #575](https://github.com/kohya-ss/musubi-tuner/pull/575) [Discussion #564](https://github.com/kohya-ss/musubi-tuner/discussions/564)も参照してください。
+        - これによりFP8量子化の精度が向上し、各モデル（HunyuanVideoを除く）学習の安定、推論精度の向上が期待できます。学習、推論速度はわずかに低下します。
+        - Qwen-ImageのLoRA学習では、量子化対象モジュールの見直しにより、学習に必要なVRAMが5GB程度削減されます。
+        - 詳細は[高度な設定のドキュメント](./docs/advanced_config.md#fp8-weight-optimization-for-models--モデルの重みのfp8への最適化)を参照してください。
+
+- 2025/09/22
+    - FramePackのVAEについて強制的にtilingが有効になっていた不具合を修正しました。`--vae_tiling`オプションを指定するか、`--vae_spatial_tile_sample_min_size`を指定することでtilingが有効になります。[PR #583](https://github.com/kohya-ss/musubi-tuner/pull/583)
+
 - 2025/09/20
     - `qwen_image_generate_image.py` で`--from_file`での生成が動作しない不具合が修正されました。[PR #553](https://github.com/kohya-ss/musubi-tuner/pull/553) および [PR #557](https://github.com/kohya-ss/musubi-tuner/pull/557) nmfisher 氏に感謝します。
         - また同スクリプトに`--append_original_name`オプションが追加されました。編集時に元の画像のベース名を出力ファイル名に追加します。
@@ -140,22 +159,6 @@ GitHub Discussionsを有効にしました。コミュニティのQ&A、知識�
         - block swapと組み合わせて使用することも可能です。
         - 特に長い動画や大きなバッチサイズで学習する際に、VRAMの使用量を削減できます。block swapと組み合わせることでこれらの学習が可能になる場合があります。
         - 詳細はPRおよび[HunyuanVideoのドキュメント](./docs/hunyuan_video.md#memory-optimization)を参照してください。
-
-- 2025/09/06
-    - 新しいLRスケジューラRexを追加しました。[PR #513](https://github.com/kohya-ss/musubi-tuner/pull/513) xzuyn氏に感謝します。
-        - powerを1未満に設定した Polynomial Scheduler に似ていますが、Rexは学習率の減少がより緩やかです。
-        - 詳細は[高度な設定のドキュメント](./docs/advanced_config.md#rex)を参照してください。
-
-- 2025/09/02 (update)
-    - Qwen-Imageのfine tuningに対応しました。[PR #492](https://github.com/kohya-ss/musubi-tuner/pull/492)
-        - LoRA学習ではなくモデル全体を学習します。詳細は[Qwen-Imageのドキュメントのfinetuningの節](./docs/qwen_image.md#finetuning)を参照してください。
-
-- 2025/09/02
-    - ruffによるコード解析を導入しました。[PR #483](https://github.com/kohya-ss/musubi-tuner/pull/483) および[PR #488](https://github.com/kohya-ss/musubi-tuner/pull/488) arledesma 氏に感謝します。
-        - ruffはPythonのコード解析、整形ツールです。
-    - コードの貢献をいただく際は、`ruff check`を実行してコードスタイルを確認していただけると助かります。`ruff --fix`で自動修正も可能です。
-        - なおコードの整形はblackで行うか、ruffのblack互換フォーマットを使い、`line-length`を`132`に設定してください。
-        - ガイドライン等をのちほど整備する予定です。
 
 ### リリースについて
 
