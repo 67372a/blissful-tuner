@@ -89,6 +89,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--dit", type=str, default=None, help="DiT checkpoint path")
     parser.add_argument("--dit_high_noise", type=str, default=None, help="DiT checkpoint path for high noise (optional)")
+    parser.add_argument(
+        "--force_v2_1_time_embedding", action="store_true", help="Force using 2.1 style time embedding even for Wan 2.2"
+    )
     parser.add_argument("--offload_inactive_dit", action="store_true", help="Offload DiT model to CPU")
     parser.add_argument("--lazy_loading", action="store_true", help="Enable lazy loading for DiT models")
     parser.add_argument("--vae", type=str, default=None, help="VAE checkpoint path")
@@ -689,6 +692,8 @@ def load_dit_model(
         use_scaled_mm=args.fp8_fast,
         **blissful_kwargs,
     )
+    # if args.force_v2_1_time_embedding:  # Not needed in Blissful, redirected to args.simple_modulation
+    #     model.set_time_embedding_v2_1(True)
 
     # merge LoRA weights
     if args.lycoris:
@@ -1677,7 +1682,13 @@ def run_sampling(
                 previewer.preview(latent)
             if args.preview_latent_every is not None and i + 1 == len(timesteps):
                 del previewer  # Free memory in prepartion for return e.g. interactive
+
     km.terminate()
+    if len(models) > 1 and args.lazy_loading:  # lazy loading
+        del model
+        gc.collect()
+        clean_memory_on_device(device)
+
     return latent
 
 
@@ -2024,13 +2035,14 @@ def process_batch_prompts(prompts_data: List[Dict], args: argparse.Namespace) ->
         vae = load_vae(args, cfg, device, vae_dtype)
         vae.to_device(device)
 
+        clip = None
         if not cfg.v2_2:
             clip = load_clip_model(args, cfg, device)
             clip.model.to(device)
 
         # Process each image and encode with CLIP
         for prompt_data in prompts_data:
-            if "image_path" not in prompt_data:
+            if "image_path" not in prompt_data and args.image_path is None:
                 continue
 
             if not cfg.v2_2:
@@ -2049,7 +2061,8 @@ def process_batch_prompts(prompts_data: List[Dict], args: argparse.Namespace) ->
                 if prompt_args.end_image_path is not None and os.path.exists(prompt_args.end_image_path):
                     end_img = Image.open(prompt_args.end_image_path).convert("RGB")
                     end_img_tensor = TF.to_tensor(end_img).sub_(0.5).div_(0.5).to(device)
-                    end_clip_context = clip.visual([end_img_tensor[:, None, :, :]])
+                    with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
+                        end_clip_context = clip.visual([end_img_tensor[:, None, :, :]])
                     clip_context = torch.concat([clip_context, end_clip_context], dim=0)
             else:
                 clip_context = None
@@ -2378,6 +2391,8 @@ def get_generation_settings(args: argparse.Namespace) -> GenerationSettings:
 def main():
     # Parse arguments
     args = parse_args()
+    if args.force_v2_1_time_embedding:
+        args.simple_modulation = True  # Redirect Musubi flag to existing Blissful flag
 
     assert not (args.offload_inactive_dit and args.lazy_loading), (
         "--offload_inactive_dit and --lazy_loading cannot be used together"

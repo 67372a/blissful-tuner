@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from musubi_tuner.utils.device_utils import synchronize_device
 from musubi_tuner.utils.safetensors_utils import MemoryEfficientSafeOpen
-from blissful_tuner.fp8_optimization import load_safetensors_with_fp8_optimization
+from musubi_tuner.modules.fp8_optimization_utils import load_safetensors_with_fp8_optimization
 from blissful_tuner.blissful_logger import BlissfulLogger
 
 logger = BlissfulLogger(__name__, "green")
@@ -50,6 +50,7 @@ def load_safetensors_with_lora_and_fp8(
     dit_weight_dtype: Optional[torch.dtype] = None,
     target_keys: Optional[List[str]] = None,
     exclude_keys: Optional[List[str]] = None,
+    quantization_mode: str = "block",
 ) -> dict[str, torch.Tensor]:
     """
     Merge LoRA weights into the state dict of a model with fp8 optimization if needed.
@@ -112,7 +113,7 @@ def load_safetensors_with_lora_and_fp8(
         logger.info(f"Merging LoRA weights into state dict. multipliers: {lora_multipliers}")
 
         # make hook for LoRA merging
-        def weight_hook_func(model_weight_key, model_weight, keep_on_calc_device=False):
+        def weight_hook_func(model_weight_key, model_weight: torch.Tensor, keep_on_calc_device=False):
             nonlocal list_of_lora_weight_keys, lora_weights_list, lora_multipliers, calc_device
 
             if not model_weight_key.endswith(".weight"):
@@ -144,6 +145,13 @@ def load_safetensors_with_lora_and_fp8(
                 down_weight = down_weight.to(calc_device)
                 up_weight = up_weight.to(calc_device)
 
+                original_dtype = model_weight.dtype
+                if original_dtype.itemsize == 1:  # fp8
+                    # temporarily convert to float16 for calculation
+                    model_weight = model_weight.to(torch.float16)
+                    down_weight = down_weight.to(torch.float16)
+                    up_weight = up_weight.to(torch.float16)
+
                 # W <- W + U * D
                 if len(model_weight.size()) == 2:
                     # linear
@@ -164,6 +172,9 @@ def load_safetensors_with_lora_and_fp8(
                     conved = torch.nn.functional.conv2d(down_weight.permute(1, 0, 2, 3), up_weight).permute(1, 0, 2, 3)
                     # logger.info(conved.size(), weight.size(), module.stride, module.padding)
                     model_weight = model_weight + multiplier * conved * scale
+
+                if original_dtype.itemsize == 1:  # fp8
+                    model_weight = model_weight.to(original_dtype)  # convert back to original dtype
 
                 # remove LoRA keys from set
                 lora_weight_keys.remove(down_key)
@@ -187,6 +198,7 @@ def load_safetensors_with_lora_and_fp8(
         target_keys,
         exclude_keys,
         weight_hook=weight_hook,
+        quantization_mode=quantization_mode,
     )
 
     for lora_weight_keys in list_of_lora_weight_keys:
@@ -208,6 +220,7 @@ def load_safetensors_with_fp8_optimization_and_hook(
     target_keys: Optional[List[str]] = None,
     exclude_keys: Optional[List[str]] = None,
     weight_hook: callable = None,
+    quantization_mode: str = "block",
 ) -> dict[str, torch.Tensor]:
     """
     Load state dict from safetensors files and merge LoRA weights into the state dict with fp8 optimization if needed.
@@ -218,7 +231,13 @@ def load_safetensors_with_fp8_optimization_and_hook(
         )
         # dit_weight_dtype is not used because we use fp8 optimization
         state_dict = load_safetensors_with_fp8_optimization(
-            model_files, calc_device, target_keys, exclude_keys, move_to_device=move_to_device, weight_hook=weight_hook
+            model_files,
+            calc_device,
+            target_keys,
+            exclude_keys,
+            move_to_device=move_to_device,
+            weight_hook=weight_hook,
+            quantization_mode=quantization_mode,
         )
     else:
         logger.info(
