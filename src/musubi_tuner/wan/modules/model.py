@@ -817,7 +817,7 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             self.e_dtype = torch.float16
         self.simple_modulation = kwargs.get("simple_modulation", False)
         if self.model_version == "2.2" and self.simple_modulation:
-            logger.info("Using simple (Wan 2.1 style) modulation strategy to save lots of VRAM")
+            logger.info("Using simplified (Wan 2.1 style) timestep embedding to save lots of VRAM")
         self.blocks = nn.ModuleList(
             [
                 WanAttentionBlock(
@@ -1039,7 +1039,7 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         if self.rope_func == "comfy":
             self.rope_embedder = torch.compile(self.rope_embedder, **self.compile_args)
         self.get_time_embedding = torch.compile(self.get_time_embedding, **self.compile_args)
-        self.head = torch.compile(self.head, **self.compile_args)
+        # self.head = torch.compile(self.head, **self.compile_args)
         for block in self.blocks:
             block._forward = torch.compile(block._forward, **self.compile_args)  # Actual rope will be compiled as part of forward
 
