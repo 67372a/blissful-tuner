@@ -275,6 +275,16 @@ class FluxKontextNetworkTrainer(NetworkTrainer):
             loading_device=loading_device,
             fp8_scaled=args.fp8_scaled,
         )
+
+        if args.use_ramtorch:
+            try:
+                from library.ramtorch_util import replace_linear_with_ramtorch_linear
+                logger.info("Applying RamTorch to model for memory efficiency...")
+                replace_linear_with_ramtorch_linear(model, accelerator.device)
+                logger.info("RamTorch applied successfully.")
+            except ImportError as e:
+                logger.error(f"Failed to apply RamTorch: {e}")
+
         return model
 
     def scale_shift_latents(self, latents):

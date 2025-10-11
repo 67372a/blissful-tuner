@@ -1561,6 +1561,15 @@ class NetworkTrainer:
             logger.info("Enable offloading img_in and txt_in to CPU")
             transformer.enable_img_in_txt_in_offloading()
 
+        if args.use_ramtorch:
+            try:
+                from library.ramtorch_util import replace_linear_with_ramtorch_linear
+                logger.info("Applying RamTorch to transformer for memory efficiency...")
+                replace_linear_with_ramtorch_linear(transformer, accelerator.device)
+                logger.info("RamTorch applied successfully.")
+            except ImportError as e:
+                logger.error(f"Failed to apply RamTorch: {e}")
+
         return transformer
 
     def scale_shift_latents(self, latents):
@@ -2902,6 +2911,12 @@ def setup_parser_common() -> argparse.ArgumentParser:
         "--fp16_accumulation",
         action="store_true",
         help="(Not recommended for training) Enable full FP16 Accmumulation in FP16 GEMMs, requires Pytorch 2.7.0 or higher",
+    )
+
+    parser.add_argument(
+        "--use_ramtorch",
+        action="store_true",
+        help="Use RamTorch to reduce GPU memory usage by keeping model weights on CPU.",
     )
     return parser
 
