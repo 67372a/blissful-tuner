@@ -496,7 +496,10 @@ class FramePackNetworkTrainer(NetworkTrainer):
         dit_weight_dtype: Optional[torch.dtype],
     ):
         device = accelerator.device
-        model = load_packed_model(device, dit_path, attn_mode, loading_device, args.fp8_scaled, split_attn)
+
+        model = load_packed_model(
+            device, dit_path, attn_mode, loading_device, args.fp8_scaled, split_attn, disable_numpy_memmap=args.disable_numpy_memmap
+        )
 
         if args.use_ramtorch:
             try:
