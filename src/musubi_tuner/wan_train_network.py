@@ -33,6 +33,7 @@ from musubi_tuner.wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 # blissful start
 from blissful_tuner.utils import error_out
 from blissful_tuner.blissful_logger import BlissfulLogger
+from ramtorch.helpers import replace_linear_with_ramtorch
 
 logger = BlissfulLogger(__name__, "green")
 # blissful end
@@ -500,15 +501,6 @@ class WanNetworkTrainer(NetworkTrainer):
         # if args.force_v2_1_time_embedding:
         #    model.set_time_embedding_v2_1(True)
 
-        if args.use_ramtorch:
-            try:
-                from library.ramtorch_util import replace_linear_with_ramtorch_linear
-                logger.info("Applying RamTorch to model for memory efficiency...")
-                replace_linear_with_ramtorch_linear(model, accelerator.device)
-                logger.info("RamTorch applied successfully.")
-            except ImportError as e:
-                logger.error(f"Failed to apply RamTorch: {e}")
-
         if self.high_low_training:
             # load high noise model
             logger.info(f"Loading high noise model from {self.dit_high_noise_path}")
@@ -528,13 +520,9 @@ class WanNetworkTrainer(NetworkTrainer):
             #    model_high_noise.set_time_embedding_v2_1(True)
 
             if args.use_ramtorch:
-                try:
-                    from library.ramtorch_util import replace_linear_with_ramtorch_linear
-                    logger.info("Applying RamTorch to model_high_noise for memory efficiency...")
-                    replace_linear_with_ramtorch_linear(model_high_noise, accelerator.device)
-                    logger.info("RamTorch applied successfully.")
-                except ImportError as e:
-                    logger.error(f"Failed to apply RamTorch: {e}")
+                if isinstance(network, torch.nn.Module):
+                    network = replace_linear_with_ramtorch(network, accelerator.device)
+                    logger.info("RamTorch applied to Wan high noise model.")
 
             if self.blocks_to_swap > 0:
                 # This moves the weights to the appropriate device

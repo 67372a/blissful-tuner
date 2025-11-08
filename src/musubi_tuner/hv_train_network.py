@@ -47,6 +47,7 @@ from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO,
 from musubi_tuner.hv_generate_video import save_images_grid, save_videos_grid, resize_image_to_bucket, encode_to_latents
 
 from blissful_tuner.blissful_logger import BlissfulLogger
+from ramtorch.helpers import replace_linear_with_ramtorch
 
 from musubi_tuner.utils import huggingface_utils, model_utils, train_utils, sai_model_spec
 
@@ -1737,6 +1738,11 @@ class NetworkTrainer:
             vae.requires_grad_(False)
             vae.eval()
 
+        if args.use_ramtorch:
+            if isinstance(transformer, torch.nn.Module):
+                transformer = replace_linear_with_ramtorch(transformer, accelerator.device)
+                logger.info("RamTorch applied to model vae.")
+
         # load DiT model
         blocks_to_swap = args.blocks_to_swap if args.blocks_to_swap else 0
         self.blocks_to_swap = blocks_to_swap
@@ -1762,6 +1768,11 @@ class NetworkTrainer:
         )
         transformer.eval()
         transformer.requires_grad_(False)
+
+        if args.use_ramtorch:
+            if isinstance(transformer, torch.nn.Module):
+                transformer = replace_linear_with_ramtorch(transformer, accelerator.device)
+                logger.info("RamTorch applied to model transformer.")
 
         if blocks_to_swap > 0:
             logger.info(
@@ -1843,6 +1854,11 @@ class NetworkTrainer:
             # FIXME consider alpha of weights: this assumes that the alpha is not changed
             info = network.load_weights(args.network_weights)
             accelerator.print(f"load network weights from {args.network_weights}: {info}")
+
+        if args.use_ramtorch:
+            if isinstance(network, torch.nn.Module):
+                network = replace_linear_with_ramtorch(network, accelerator.device)
+                logger.info("RamTorch applied to network/lora.")
 
         if args.gradient_checkpointing:
             transformer.enable_gradient_checkpointing(args.gradient_checkpointing_cpu_offload)
