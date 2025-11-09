@@ -520,8 +520,8 @@ class WanNetworkTrainer(NetworkTrainer):
             #    model_high_noise.set_time_embedding_v2_1(True)
 
             if args.use_ramtorch:
-                if isinstance(network, torch.nn.Module):
-                    network = replace_linear_with_ramtorch(network, accelerator.device)
+                if isinstance(model_high_noise, torch.nn.Module):
+                    model_high_noise = replace_linear_with_ramtorch(model_high_noise, accelerator.device)
                     logger.info("RamTorch applied to Wan high noise model.")
 
             if self.blocks_to_swap > 0:
