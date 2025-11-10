@@ -1739,8 +1739,8 @@ class NetworkTrainer:
             vae.eval()
 
         if args.use_ramtorch:
-            if isinstance(transformer, torch.nn.Module):
-                transformer = replace_linear_with_ramtorch(transformer, accelerator.device)
+            if isinstance(vae, torch.nn.Module):
+                vae = replace_linear_with_ramtorch(vae, accelerator.device)
                 logger.info("RamTorch applied to model vae.")
 
         # load DiT model
