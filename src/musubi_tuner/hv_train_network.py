@@ -1562,15 +1562,6 @@ class NetworkTrainer:
             logger.info("Enable offloading img_in and txt_in to CPU")
             transformer.enable_img_in_txt_in_offloading()
 
-        if args.use_ramtorch:
-            try:
-                from library.ramtorch_util import replace_linear_with_ramtorch_linear
-                logger.info("Applying RamTorch to transformer for memory efficiency...")
-                replace_linear_with_ramtorch_linear(transformer, accelerator.device)
-                logger.info("RamTorch applied successfully.")
-            except ImportError as e:
-                logger.error(f"Failed to apply RamTorch: {e}")
-
         return transformer
 
     def scale_shift_latents(self, latents):
@@ -1746,7 +1737,7 @@ class NetworkTrainer:
         # load DiT model
         blocks_to_swap = args.blocks_to_swap if args.blocks_to_swap else 0
         self.blocks_to_swap = blocks_to_swap
-        loading_device = "cpu" if blocks_to_swap > 0 else accelerator.device
+        loading_device = "cpu" if blocks_to_swap > 0 or args.use_ramtorch else accelerator.device
 
         if args.sdpa:
             attn_mode = "torch"
