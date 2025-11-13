@@ -1846,10 +1846,10 @@ class NetworkTrainer:
             info = network.load_weights(args.network_weights)
             accelerator.print(f"load network weights from {args.network_weights}: {info}")
 
-        if args.use_ramtorch:
-            if isinstance(network, torch.nn.Module):
-                network = replace_linear_with_ramtorch(network, accelerator.device)
-                logger.info("RamTorch applied to network/lora.")
+        #if args.use_ramtorch:
+        #    if isinstance(network, torch.nn.Module):
+        #        network = replace_linear_with_ramtorch(network, accelerator.device)
+        #        logger.info("RamTorch applied to network/lora.")
 
         if args.gradient_checkpointing:
             transformer.enable_gradient_checkpointing(args.gradient_checkpointing_cpu_offload)
