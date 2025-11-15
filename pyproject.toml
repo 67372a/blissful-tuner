@@ -49,7 +49,7 @@ dependencies = [
     "torchastic~=0.1.2",
     "torch-optimi~=0.3.2",
     "lion-pytorch~=0.2.3",
-    "RamTorch~=0.2.1",
+    "RamTorch @ git+https://github.com/67372a/RamTorch",
     "customized-optimizers @ git+https://github.com/67372a/customized-optimizers",
     "lycoris-lora @ git+https://github.com/67372a/LyCORIS",
     # TOML validator for Python < 3.11 (GUI Datasets tab)
