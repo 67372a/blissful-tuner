@@ -519,7 +519,21 @@ class QwenImageTrainer(QwenImageNetworkTrainer):
 
             metadata_to_save.update(sai_metadata)
 
-            state_dict = unwrapped_model.state_dict()
+            # temporarily remove self-referencing _orig_mod to avoid infinite recursion in state_dict()
+            has_self_ref_orig_mod_module = (
+                hasattr(unwrapped_model, "_modules")
+                and "_orig_mod" in unwrapped_model._modules
+                and unwrapped_model._modules["_orig_mod"] is unwrapped_model
+            )
+            if has_self_ref_orig_mod_module:
+                del unwrapped_model._modules["_orig_mod"]
+
+            try:
+                state_dict = unwrapped_model.state_dict()
+            finally:
+                # restore _orig_mod after state_dict() if it was removed
+                if has_self_ref_orig_mod_module:
+                    unwrapped_model._modules["_orig_mod"] = unwrapped_model
 
             # if model is compiled, get original model state dict
             if "transformer_blocks.0._orig_mod.attn.add_k_proj.bias" in state_dict:
@@ -552,7 +566,11 @@ class QwenImageTrainer(QwenImageNetworkTrainer):
         # training loop
 
         # log device and dtype for each model
-        logger.info(f"DiT dtype: {transformer.dtype}, device: {transformer.device}")
+        unwrapped_transformer = accelerator.unwrap_model(transformer)
+        first_param = next(iter(unwrapped_transformer.parameters()), None)
+        logger.info(
+            f"DiT dtype: {first_param.dtype if first_param is not None else None}, device: {first_param.device if first_param is not None else accelerator.device}"
+        )
 
         clean_memory_on_device(accelerator.device)
 
