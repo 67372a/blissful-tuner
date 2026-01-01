@@ -1080,6 +1080,10 @@ class FineTuningTrainer:
                     # flow matching loss
                     target = noise - latents
 
+                    # Make loss float64
+                    model_pred = model_pred.to(torch.float64)
+                    target = target.to(torch.float64)
+
                     loss = loss_utils.conditional_loss(model_pred, target, loss_type=args.loss_type, delta_beta=float(args.loss_delta_beta) if args.loss_delta_beta is not None else None)
 
                     if weighting is not None:
