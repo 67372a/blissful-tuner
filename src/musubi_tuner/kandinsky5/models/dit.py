@@ -2,8 +2,6 @@
 # https://github.com/kandinskylab/kandinsky-5
 # Copyright (c) 2025 Kandinsky Lab
 # Licensed under the MIT License
-
-import logging
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
@@ -25,9 +23,12 @@ from .nn import (
     _maybe_compile,
 )
 from .utils import fractal_flatten, fractal_unflatten
+from musubi_tuner.modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
 from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
 
-logger = logging.getLogger(__name__)
+from blissful_tuner.blissful_logger import BlissfulLogger
+
+logger = BlissfulLogger(__name__, "green")
 
 
 class TransformerEncoderBlock(nn.Module):
@@ -228,6 +229,46 @@ class DiffusionTransformer3D(nn.Module):
 
         x = self.after_blocks(visual_embed, visual_shape, to_fractal, text_embed, time_embed)
         return x
+
+    def fp8_optimization(
+        self, state_dict: dict[str, torch.Tensor], device: torch.device, move_to_device: bool, use_scaled_mm: bool = False
+    ) -> int:
+        """
+        Optimize the model state_dict with fp8.
+
+        Args:
+            state_dict (dict[str, torch.Tensor]):
+                The state_dict of the model.
+            device (torch.device):
+                The device to calculate the weight.
+            move_to_device (bool):
+                Whether to move the weight to the device after optimization.
+        """
+        quantization_mode = "block" if not use_scaled_mm else "tensor"
+        block_size = 16 if move_to_device else 32  # Move to device is True if blocks_to_swap == 0 else False
+        target_keys = [
+            "visual_transformer_blocks",
+            "text_transformer_blocks",
+            "out_layer",
+        ]
+        exclude_keys: list[str] = ["norm"]  # skip LayerNorm-like weights to avoid unmatched scale_weight buffers
+        logger.info(
+            f"Using per '{quantization_mode}' quantization mode as scaled_mm/fp8_fast {'is' if use_scaled_mm else 'is not'} enabled"
+        )
+        state_dict = optimize_state_dict_with_fp8(
+            state_dict,
+            device,
+            target_keys,
+            exclude_keys,
+            block_size=block_size,
+            move_to_device=move_to_device,
+            quantization_mode=quantization_mode,
+        )
+
+        # apply monkey patching
+        apply_fp8_monkey_patch(self, state_dict, use_scaled_mm=use_scaled_mm, exclude_ffn_from_scaled_mm=True)
+
+        return state_dict
 
     # Offloading
     def enable_block_swap(self, num_blocks: int, device: torch.device, supports_backward: bool, use_pinned_memory: bool = False):

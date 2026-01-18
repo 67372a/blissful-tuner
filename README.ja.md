@@ -14,21 +14,21 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 
 プロジェクトの拡大に​​合わせてこのセクションをメンテナンスしやすくするため、各機能は一度だけリストアップし、プロジェクト内のどのモデルが現在その機能をサポートしているかを示す凡例も表示します。ほとんどの機能は推論に関するもので、トレーニングに利用可能な機能がある場合は特に明記します。また、記載しきれないほど多くの小さな最適化や機能追加も実施しました。最新のアップデートについては、[こちら](https://github.com/kohya-ss/musubi-tuner/discussions/232) で開発ログのようなものを公開しています。
 
-現在のモデルの凡例：Hunyuan Video: (HY)、Wan 2.1/2.2: (WV)、Framepack: (FP)、Flux (FX)、Qwen Image (QI)、トレーニングに利用可能: (T)
+現在のモデルの凡例：Hunyuan Video: (HY)、Wan 2.1/2.2: (WV)、Framepack: (FP)、Flux (FX)、Qwen Image (QI)、Kandinsky 5 (K5), Z-Image (ZI), トレーニングに利用可能: (T)
 
 素晴らしい機能：
-- 美しく豊富なログ機能、豊富なargparse、豊富なトレースバック (HY) (WV) (FP) (FX) (QI) (T)
-- プロンプトにワイルドカードを使用することで、バリエーションを増やすことができます！ (`--prompt_wildcards /path/to/wildcard/directory` のように指定します。例えば、プロンプトで `__color__` と指定すると、そのディレクトリ内の color.txt が検索されます。ワイルドカードファイルの形式は、1行につき1つの置換文字列で、red:2.0 や "some long string:0.5" のように相対的な重みをオプションで付加できます。ワイルドカード自体にワイルドカードを含めることも可能で、再帰回数の制限は50回です。) (HY) (WV) (FP) (FX) (QI)
-- シードとして文字列を使用するのは良いでしょう。覚えやすいのも魅力です。 (HY) (WV) (FP) (FX) (QI)
-- 推論用の外部LoRAを、事前に変換することなく読み込みます (HY) (WV) (FP) (FX) (QI)
+- 美しく豊富なログ機能、豊富なargparse、豊富なトレースバック (HY) (WV) (FP) (FX) (QI) (K5) (T)
+- プロンプトにワイルドカードを使用することで、バリエーションを増やすことができます！ (`--prompt_wildcards /path/to/wildcard/directory` のように指定します。例えば、プロンプトで `__color__` と指定すると、そのディレクトリ内の color.txt が検索されます。ワイルドカードファイルの形式は、1行につき1つの置換文字列で、red:2.0 や "some long string:0.5" のように相対的な重みをオプションで付加できます。ワイルドカード自体にワイルドカードを含めることも可能で、再帰回数の制限は50回です。) (HY) (WV) (FP) (FX) (QI) (K5)
+- シードとして文字列を使用するのは良いでしょう。覚えやすいのも魅力です。 (HY) (WV) (FP) (FX) (QI) (K5)
+- 推論用の外部LoRAを、事前に変換することなく読み込みます (HY) (WV) (FP) (FX) (QI) (K5)
 - 決定論を保証する強力な世代ごとのグローバルシード (HY) (WV) (FP) (FX) (QI)
-- 生成中にlatent2RGBまたはTAEHV（`--preview_latent_every N`、Nはステップ数（フレームパックの場合はセクション数））を使用した潜在プレビュー。デフォルトではlatent2rgbを使用しますが、TAEは`--preview_vae /path/to/model`で有効にできます。モデル：https://huggingface.co/Blyss/BlissfulModels/tree/main/taehv）(HY) (WV) (FP) (FX)
+- 生成中にlatent2RGBまたはTAEHV（`--preview_latent_every N`、Nはステップ数（フレームパックの場合はセクション数））を使用した潜在プレビュー。デフォルトではlatent2rgbを使用しますが、TAEは`--preview_vae /path/to/model`で有効にできます。モデル：https://huggingface.co/Blyss/BlissfulModels/tree/main/taehv）(HY) (WV) (FP) (FX) (K5)
 - 高速で高品質な生成のために最適化された生成設定（`--optimized`\*、モデルに基づいてさまざまな最適化と設定を有効にします。SageAttention、Triton、PyTorch 2.7.0以降が必要です）(HY) (WV) (FP) (FX)
-- FP16 積分 (`--fp16_accumulation`、Wan FP16 モデルで最も効果的に機能します (Hunyaun bf16 でも動作します!)。PyTorch 2.7.0 以上が必要ですが、推論速度が大幅に向上します。特に `--compile`\* を使用すると、精度を損なうことなく fp8_fast/mmscaled とほぼ同等の速度を実現できます。また、fp8 スケールモードでも動作します!) (HY) (WV) (FP) (FX)
-- 拡張保存オプション (`--codec codec --container container`、Apple ProRes (`--codec prores`、超高ビットレートで知覚的にロスレス) を `--container mkv` に保存、または `h264`、`h265` のいずれかを `mp4` または `mkv` に保存可能) (HY) (WV) (FP)
+- FP16 積分 (`--fp16_accumulation`、Wan FP16 モデルで最も効果的に機能します (Hunyaun bf16 でも動作します!)。PyTorch 2.7.0 以上が必要ですが、推論速度が大幅に向上します。特に `--compile`\* を使用すると、精度を損なうことなく fp8_fast/mmscaled とほぼ同等の速度を実現できます。また、fp8 スケールモードでも動作します!) (HY) (WV) (FP) (FX) (K5)
+- 拡張保存オプション (`--codec codec --container container`、Apple ProRes (`--codec prores`、超高ビットレートで知覚的にロスレス) を `--container mkv` に保存、または `h264`、`h265` のいずれかを `mp4` または `mkv` に保存可能) (HY) (WV) (FP) (K5)
 - 生成メタデータを動画/画像に保存 (自動`--container mkv` を使用し、PNG 保存時は `--no-metadata` で無効にしてください。`--container mp4` では無効です。こうしたメタデータは `src/blissful_tuner/metaview.py some_video.mkv` で簡単に表示/コピーできます。ビューアには mediainfo_cli が必要です) (HY) (WV) (FP) (FX)
-- CFGZero* 例: https://github.com/WeichenFan/CFG-Zero-star (`--cfgzerostar_scaling --cfgzerostar_init_steps N` で、N は開始時に 0 になるまでのステップ数です。T2V の場合は 2、I2V の場合は 1 が適切ですが、私の経験では T2V の方が適しています。Hunyuan のサポートは非​​常に実験的であり、CFG が有効になっている場合にのみ利用可能です。) (HY) (WV) (FX)
-- 高度な CFG スケジューリング: (`--cfg_schedule`、使用方法については `--help` を参照してください。必要に応じて、個々のステップにガイダンススケールダウンを指定することもできます!) (HY) (WV) (FX)
+- CFGZero* 例: https://github.com/WeichenFan/CFG-Zero-star (`--cfgzerostar_scaling --cfgzerostar_init_steps N` で、N は開始時に 0 になるまでのステップ数です。T2V の場合は 2、I2V の場合は 1 が適切ですが、私の経験では T2V の方が適しています。Hunyuan のサポートは非​​常に実験的であり、CFG が有効になっている場合にのみ利用可能です。) (HY) (WV) (FX) (K5)
+- 高度な CFG スケジューリング: (`--cfg_schedule`、使用方法については `--help` を参照してください。必要に応じて、個々のステップにガイダンススケールダウンを指定することもできます!) (HY) (WV) (FX) (K5)
 - RifleX 例:より長い動画の場合は https://github.com/thu-ml/RIFLEx をご覧ください (`--riflex_index N`、N は RifleX の周波数です。Wan の場合は 6 が適しており、通常 81 フレームではなく約 115 フレームまで再生できます。Wan の場合は `--rope_func comfy` が必要です。Hunyuan の場合は 4 が適しており、少なくとも 2 倍の長さにできます!) (HY) (WV)
 - 垂直ネガティブガイダンス (`--perp_neg neg_strength`、neg_strength はネガティブプロンプトの文字列を制御する浮動小数点数です。詳しくは `--help` を参照してください!) (HY) (WV)
 - 正規化アテンションガイダンス (NAG) (https://arxiv.org/pdf/2505.21179) (クロスアテンション層内でネガティブガイダンスを提供します。通常の CFG だけでなく、蒸留モデルでも動作します。有効にするには`--nag_scale 3.0` を指定して否定プロンプトを表示してください！ (WV)
@@ -116,6 +116,19 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 
 GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- 2026/01/17
+    - Z-ImageのComfyUI向けのLoRA変換について、互換性向上のため `convert_lora.py` を使用するように変更しました。[PR #851](https://github.com/kohya-ss/musubi-tuner/pull/851)
+        - 以前の `convert_z_image_lora_to_comfy.py` も引き続き使用可能ですが、nunchakuで正しく動作しない可能性があります。
+        - 詳細は[ドキュメント](./docs/zimage.md#converting-lora-weights-to-diffusers-format-for-comfyui--lora重みをcomfyuiで使用可能なdiffusers形式に変換する)を参照してください。
+        - [Issue #847](https://github.com/kohya-ss/musubi-tuner/issues/847) で解決策を提供してくださったfai-9氏に感謝します。
+    - Qwen-Image-LayeredのLoRA学習で、元画像を学習対象から除外するオプション `--remove_first_image_from_target` を追加しました。[PR #852](https://github.com/kohya-ss/musubi-tuner/pull/852)
+        - 詳細は[ドキュメント](./docs/qwen_image.md#lora-training--lora学習)を参照してください。
+
+- 2026/01/11
+    - Qwen-Image-LayeredのLoRA学習に対応しました。[PR #816](https://github.com/kohya-ss/musubi-tuner/pull/816)
+        - 詳細は[ドキュメント](./docs/qwen_image.md)を参照してください。
+        - キャッシュ作成、学習、推論の各スクリプトで、`--model_version` オプションに `layered` を指定してください。
+
 - 2025/12/27
     - Qwen-Image-Edit-2511に対応しました。[PR #808](https://github.com/kohya-ss/musubi-tuner/pull/808)
         - チェックポイントやオプションの詳細など、詳細は[ドキュメント](./docs/qwen_image.md)を参照してください。
@@ -131,20 +144,6 @@ GitHub Discussionsを有効にしました。コミュニティのQ&A、知識�
         - 詳細は[ドキュメント](./docs/zimage.md#finetuning)を参照してください。
     - ごくシンプルなGUIツールを追加しました。[PR #779](https://github.com/kohya-ss/musubi-tuner/pull/779)
         - 現在はZ-Image-TurboとQwen-ImageのLoRA学習に対応しています。詳細は[ドキュメント](./src/musubi_tuner/gui/gui.ja.md)を参照してください。
-
-- 2025/12/09
-    - Diffusers形式のLoRA重みを学習スクリプトの `--base_weights` オプションで読み込めるようになりました。[PR #772](https://github.com/kohya-ss/musubi-tuner/pull/772) これによりZ-Image-TurboのTraining Adapter等を使用して学習できます。
-    - De-TurboモデルおよびTraining Adapterを使用してZ-Image-TurboのLoRA学習を行う方法について、[ドキュメント](./docs/zimage.md)を更新しました。
-    - これらを提供してくださった ostris 氏に深く感謝します。
-
-- 2025/12/07
-    - Z-Image Turboに対応しました。[PR #757](https://github.com/kohya-ss/musubi-tuner/pull/757)
-        - Turboモデル（蒸留モデル）のため学習が不安定かもしれません。フィードバックを歓迎します。
-        - 詳細は[ドキュメント](./docs/zimage.md)を参照してください。
-
-- 2025/12/05
-    - HunyuanVideo 1.5に対応しました。[PR #748](https://github.com/kohya-ss/musubi-tuner/pull/748)
-        - T2V、I2VのLoRA学習が可能です。詳細は[ドキュメント](./docs/hunyuan_video_1_5.md)を参照してください。
 
 ### リリースについて
 

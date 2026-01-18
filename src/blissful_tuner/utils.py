@@ -21,6 +21,23 @@ except ImportError:
     from blissful_tuner.blissful_logger import BlissfulLogger
 
 
+def ensure_dtype_form(dtype: Union[None, str, torch.dtype], out_form: str = "torch") -> Union[None, str, torch.dtype]:
+    """For managing dtypes betweeen str and torch.dtype easily in one place. More robust than str_to_dtype below"""
+    str_to_torch = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
+    torch_to_str = {torch.float16: "float16", torch.float32: "float32", torch.bfloat16: "bfloat16"}
+    valid_torch_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    valid_str_dtypes = ["float16", "bfloat16", "float32"]
+    if dtype is None:
+        return None
+    if (out_form == "torch" and dtype in valid_torch_dtypes) or (out_form == "str" and dtype in valid_str_dtypes):
+        return dtype
+    if out_form == "torch" and dtype in valid_str_dtypes:
+        return str_to_torch[dtype]
+    if out_form == "str" and dtype in valid_torch_dtypes:
+        return torch_to_str[dtype]
+    raise ValueError(f"Unable to process '{dtype}' into type '{out_form}'")
+
+
 # Adapted from ComfyUI
 def load_torch_file(
     ckpt: str, safe_load: bool = True, device: Optional[Union[str, torch.device]] = None, return_metadata: bool = False
