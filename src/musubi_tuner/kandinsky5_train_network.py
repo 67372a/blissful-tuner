@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import Optional
 
 import torch
-import torch.nn.functional as F
 from accelerate import Accelerator, init_empty_weights
 from musubi_tuner.utils.safetensors_utils import MemoryEfficientSafeOpen
 
@@ -237,6 +236,7 @@ class Kandinsky5NetworkTrainer(NetworkTrainer):
                     text_embedder_conf,
                     device=accelerator.device if not getattr(args, "text_encoder_cpu", False) else "cpu",
                     quantized_qwen=getattr(args, "quantized_qwen", False),
+                    qwen_auto=getattr(args, "text_encoder_auto", False),
                 )
                 # default negative prompt if none provided
                 neg_text = neg_prompt if neg_prompt else "low quality, bad quality"
@@ -468,6 +468,7 @@ class Kandinsky5NetworkTrainer(NetworkTrainer):
             text_embedder_conf,
             device=accelerator.device if not getattr(args, "text_encoder_cpu", False) else "cpu",
             quantized_qwen=getattr(args, "quantized_qwen", False),
+            qwen_auto=getattr(args, "text_encoder_auto", False),
         )
 
         images = generation_utils.generate_sample(
@@ -624,69 +625,70 @@ class Kandinsky5NetworkTrainer(NetworkTrainer):
         del state_dict
 
         model.attention = SimpleNamespace(**self.task_conf.attention.__dict__)
+
         model.to(target_device)
         model.dtype = next(model.parameters()).dtype  # align hv_train_network logging expectation
         model.device = target_device  # align hv_train_network logging expectation
 
-        # Ensure norm params are not fp8 (fp8 norms trigger unsupported ops).
-        import torch.nn as nn  # local import to avoid cyclic issues
+        # # Ensure norm params are not fp8 (fp8 norms trigger unsupported ops).
+        # import torch.nn as nn  # local import to avoid cyclic issues
 
-        def _upcast_stable_params(m: nn.Module):
-            # Keep numerically sensitive pieces in float32.
-            for name, p in m.named_parameters(recurse=False):
-                if any(key in name for key in ["embedding", "embeddings", "rope"]):
-                    p.data = p.data.to(torch.float32)
-                if isinstance(m, (nn.LayerNorm, getattr(nn, "RMSNorm", nn.LayerNorm))):
-                    p.data = p.data.to(torch.float32)
-            for name, b in m.named_buffers(recurse=False):
-                if isinstance(b, torch.Tensor) and any(key in name for key in ["embedding", "embeddings", "rope"]):
-                    setattr(m, name, b.to(torch.float32))
+        # def _upcast_stable_params(m: nn.Module):
+        #     # Keep numerically sensitive pieces in float32.
+        #     for name, p in m.named_parameters(recurse=False):
+        #         if any(key in name for key in ["embedding", "embeddings", "rope"]):
+        #             p.data = p.data.to(torch.float32)
+        #         if isinstance(m, (nn.LayerNorm, getattr(nn, "RMSNorm", nn.LayerNorm))):
+        #             p.data = p.data.to(torch.float32)
+        #     for name, b in m.named_buffers(recurse=False):
+        #         if isinstance(b, torch.Tensor) and any(key in name for key in ["embedding", "embeddings", "rope"]):
+        #             setattr(m, name, b.to(torch.float32))
 
-        cast_dtype = dit_weight_dtype if dit_weight_dtype is not None else torch.bfloat16
+        # cast_dtype = dit_weight_dtype if dit_weight_dtype is not None else torch.bfloat16
 
-        for mod in model.modules():
-            if isinstance(mod, (nn.LayerNorm, getattr(nn, "RMSNorm", nn.LayerNorm))):
-                if hasattr(mod, "weight") and isinstance(mod.weight, torch.Tensor):
-                    mod.weight.data = mod.weight.data.to(cast_dtype)
-                if hasattr(mod, "bias") and isinstance(mod.bias, torch.Tensor) and mod.bias is not None:
-                    mod.bias.data = mod.bias.data.to(cast_dtype)
-            _upcast_stable_params(mod)
-        for name, param in model.named_parameters():
-            if "norm" in name:
-                param.data = param.data.to(cast_dtype)
+        # for mod in model.modules():
+        #     if isinstance(mod, (nn.LayerNorm, getattr(nn, "RMSNorm", nn.LayerNorm))):
+        #         if hasattr(mod, "weight") and isinstance(mod.weight, torch.Tensor):
+        #             mod.weight.data = mod.weight.data.to(cast_dtype)
+        #         if hasattr(mod, "bias") and isinstance(mod.bias, torch.Tensor) and mod.bias is not None:
+        #             mod.bias.data = mod.bias.data.to(cast_dtype)
+        #     _upcast_stable_params(mod)
+        # for name, param in model.named_parameters():
+        #     if "norm" in name:
+        #         param.data = param.data.to(cast_dtype)
 
         # Cast any stray fp8 params/buffers outside Linear fp8 modules back to bf16 to avoid unsupported ops.
-        for mod in model.modules():
-            is_fp8_linear = isinstance(mod, nn.Linear) and hasattr(mod, "scale_weight")
-            if not is_fp8_linear:
-                for p in mod.parameters(recurse=False):
-                    if p.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
-                        p.data = p.data.to(cast_dtype)
-                for b_name, b in mod.named_buffers(recurse=False):
-                    if isinstance(b, torch.Tensor) and b.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
-                        setattr(mod, b_name, b.to(cast_dtype))
+        # for mod in model.modules():
+        #     is_fp8_linear = isinstance(mod, nn.Linear) and hasattr(mod, "scale_weight")
+        #     if not is_fp8_linear:
+        #         for p in mod.parameters(recurse=False):
+        #             if p.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        #                 p.data = p.data.to(cast_dtype)
+        #         for b_name, b in mod.named_buffers(recurse=False):
+        #             if isinstance(b, torch.Tensor) and b.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        #                 setattr(mod, b_name, b.to(cast_dtype))
 
-        # Ensure fp8 linears use safe dequant (float32 scale/weight) to avoid unsupported float8 ops.
-        for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Linear) and hasattr(module, "scale_weight"):
-                module.scale_weight = module.scale_weight.to(torch.float32)
+        # # Ensure fp8 linears use safe dequant (float32 scale/weight) to avoid unsupported float8 ops.
+        # for name, module in model.named_modules():
+        #     if isinstance(module, torch.nn.Linear) and hasattr(module, "scale_weight"):
+        #         module.scale_weight = module.scale_weight.to(torch.float32)
 
-                def _safe_forward(self, x):
-                    target_device = x.device
-                    weight = self.weight.to(device=target_device, dtype=torch.float32)
-                    scale = self.scale_weight.to(device=target_device, dtype=torch.float32)
-                    if scale.ndim < 3:
-                        w = weight * scale
-                    else:
-                        out_features, num_blocks, _ = scale.shape
-                        w = weight.contiguous().view(out_features, num_blocks, -1)
-                        w = w * scale
-                        w = w.view(self.weight.shape)
-                    bias = self.bias.to(target_device) if self.bias is not None else None
-                    out = F.linear(x, w, bias)
-                    return out.to(x.dtype)
+        #         def _safe_forward(self, x):
+        #             target_device = x.device
+        #             weight = self.weight.to(device=target_device, dtype=torch.float32)
+        #             scale = self.scale_weight.to(device=target_device, dtype=torch.float32)
+        #             if scale.ndim < 3:
+        #                 w = weight * scale
+        #             else:
+        #                 out_features, num_blocks, _ = scale.shape
+        #                 w = weight.contiguous().view(out_features, num_blocks, -1)
+        #                 w = w * scale
+        #                 w = w.view(self.weight.shape)
+        #             bias = self.bias.to(target_device) if self.bias is not None else None
+        #             out = F.linear(x, w, bias)
+        #             return out.to(x.dtype)
 
-                module.forward = _safe_forward.__get__(module, type(module))
+        #         module.forward = _safe_forward.__get__(module, type(module))
         if getattr(args, "compile", False):
             model = self.compile_transformer(args, model)
         return model
@@ -750,6 +752,9 @@ class Kandinsky5NetworkTrainer(NetworkTrainer):
         attention_conf = getattr(self.task_conf, "attention", SimpleNamespace(chunk=False, chunk_len=None))
         chunk_len = getattr(attention_conf, "chunk_len", None) or None
         chunk_mode = bool(attention_conf.chunk and chunk_len and chunk_len > 0)
+        # ensure the hidden state will require grad
+        if args.gradient_checkpointing:
+            noisy_model_input.requires_grad_(True)
 
         for b in range(bsz):
             latent_b = latents[b].to(accelerator.device, dtype=network_dtype)
@@ -938,6 +943,7 @@ def kandinsky5_setup_parser(parser: argparse.ArgumentParser) -> argparse.Argumen
     )
     parser.add_argument("--quantized_qwen", action="store_true", help="Load Qwen text encoder in 4bit mode")
     parser.add_argument("--text_encoder_cpu", action="store_true", help="Run Qwen TE on CPU")
+    parser.add_argument("--text_encoder_auto", action="store_true", help="Run Qwen with device_map=auto")
 
     return parser
 
@@ -948,7 +954,10 @@ def main():
 
     args = parser.parse_args()
     args = read_config_from_file(args, parser)
-
+    if sum([args.text_encoder_cpu, args.quantized_qwen, args.text_encoder_auto]) > 1:
+        raise ValueError(
+            "Only one of '--quantized_qwen', '--text_encoder_cpu', '--text_encoder_auto' may be used at a time but received more than that!"
+        )
     # defaults for fp8 flags (not defined in common parser)
     if not hasattr(args, "fp8_base"):
         args.fp8_base = False

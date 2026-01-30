@@ -6,6 +6,7 @@ from typing import Optional
 import torch
 import torchvision.utils as vutils
 from safetensors.torch import load_file, save_file
+from safetensors import safe_open
 from datetime import datetime as datetime
 import time
 from musubi_tuner.kandinsky5.configs import TASK_CONFIGS, AttentionConfig
@@ -23,7 +24,7 @@ from musubi_tuner.networks import lora_kandinsky
 from blissful_tuner.utils import ensure_dtype_form
 from blissful_tuner.blissful_core import add_blissful_k5_args, parse_blissful_args
 from blissful_tuner.guidance import parse_scheduled_cfg
-from blissful_tuner.common_extensions import save_media_advanced
+from blissful_tuner.common_extensions import save_media_advanced, prepare_metadata
 from blissful_tuner.blissful_logger import BlissfulLogger
 
 
@@ -97,12 +98,12 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     args = parse_blissful_args(args)
-    if args.quantized_qwen and args.text_encoder_cpu:
-        raise argparse.ArgumentError(
-            "Only one of '--quantized_qwen' or '--text_encoder_cpu' may be used at a time but received both!"
+    if sum([args.text_encoder_cpu, args.quantized_qwen, args.text_encoder_auto]) > 1:
+        raise ValueError(
+            "Only one of '--quantized_qwen', '--text_encoder_cpu', '--text_encoder_auto' may be used at a time but received more than that!"
         )
     if args.frames and args.video_length:
-        raise argparse.ArgumentError("Only one of '--frames' and '--video_length' is allowed but recieved both!")
+        raise ValueError("Only one of '--frames' and '--video_length' is allowed but recieved both!")
 
     if args.video_length is not None:
         original = args.video_length
@@ -185,6 +186,9 @@ def main():
     if args.decode_from_latent:
         logger.info(f"Loading latent from {args.decode_from_latent}")
         latents = load_file(args.decode_from_latent)["latent"]
+        with safe_open(args.decode_from_latent, framework="pt") as f:
+            metadata = f.metadata() if not args.no_metadata else None
+        logger.info(f"Prepared metadata: {metadata}")
         frames = len(latents)
         pixel_frames = ((frames - 1) * 4) + 1
         vae = trainer._load_vae_for_sampling(args, device=device)
@@ -192,6 +196,8 @@ def main():
         images = decode_latents(latents, vae, device=device, batch_size=shape[0])
         original_base_name = os.path.splitext(os.path.basename(args.decode_from_latent))[0].replace("_latent", "")
     else:
+        metadata = prepare_metadata(args) if not args.no_metadata else None
+        logger.info(f"Prepared metadata: {metadata}")
         # --- Stage 1: text encoder only ---
         text_embedder_conf = SimpleNamespace(
             qwen=SimpleNamespace(checkpoint_path=qwen_path, max_length=task_conf.text.qwen_max_length),
@@ -199,8 +205,9 @@ def main():
         )
         text_embedder = get_text_embedder(
             text_embedder_conf,
-            device=device if not args.text_encoder_cpu else "cpu",
+            device="cpu" if args.text_encoder_cpu else device,
             quantized_qwen=args.quantized_qwen if not args.text_encoder_cpu else False,
+            qwen_auto=args.text_encoder_auto,
         )
         neg_text = args.negative_prompt or "low quality, bad quality"
         enc_out, _, attention_mask = text_embedder.encode([args.prompt], type_of_content=("video" if frames > 1 else "image"))
@@ -388,7 +395,7 @@ def main():
             if hasattr(dit, "prepare_block_swap_before_forward"):
                 dit.prepare_block_swap_before_forward()
             logger.info(f"DiT dtype: {dit.dtype}; Autocast dtype: {autocast_dtype}")
-            with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_dtype is not None):
+            with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_dtype is not None), torch.no_grad():
                 latents = generate_sample_latents_only(
                     shape=shape,
                     dit=dit,
@@ -414,12 +421,13 @@ def main():
             del dit
             clean_memory_on_device(device)
             time_flag = get_time_flag()
+
             # --- Stage 3: load VAE, decode ---
             if args.output_type in ["latent", "both"]:
                 latent_path = f"{args.save_path}/{time_flag}_{args.seed}_latent.safetensors"
                 logger.info(f"Save latent to {latent_path}!")
                 sd = {"latent": latents}
-                save_file(sd, latent_path, metadata=None)
+                save_file(sd, latent_path, metadata=metadata)
             if args.output_type in ["video", "both"]:
                 vae = trainer._load_vae_for_sampling(args, device=device)
                 images = decode_latents(latents, vae, device=device, batch_size=shape[0], num_frames=frames)
@@ -439,7 +447,7 @@ def main():
                 if not args.decode_from_latent
                 else f"{args.save_path}/{original_base_name}.mp4"
             )
-            save_media_advanced(video_tensor, video_path, args)
+            save_media_advanced(video_tensor, video_path, args, metadata=metadata)
             first_frame_path = os.path.splitext(video_path)[0] + "_first.png"
             frame = images[0, 0].float() / 255.0
             frame = frame.cpu()
