@@ -73,22 +73,41 @@ def get_current_version() -> str:
 
 
 def blissful_prefunc(args: argparse.Namespace):
+    def can_use_fp8_matmul():
+        if not torch.cuda.is_available():
+            return False
+
+        major, minor = torch.cuda.get_device_capability()
+
+        # Native FP8 tensor cores begin at SM 8.9 (Ada) and above
+        supports_fp8 = (major > 8) or (major == 8 and minor >= 9)
+
+        if not supports_fp8:
+            return False
+
+        if not hasattr(torch, "float8_e4m3fn"):
+            return False
+
+        return True
+
     """Simple function to print about version, environment, and things"""
     cuda_list = [f"Python: {sys.version.split(' ')[0]}"]
     gc.collect()
+    can_use_fp8 = False
     if torch.cuda.is_available():
+        can_use_fp8 = can_use_fp8_matmul()
         torch.cuda.empty_cache()
         allocator = torch.cuda.get_allocator_backend()
         cuda = torch.cuda.get_device_properties(0)
         cuda_list[0] += f", CUDA: {torch.version.cuda} CC: {cuda.major}.{cuda.minor}"
         cuda_list.append(f"Device: '{cuda.name}', VRAM: '{cuda.total_memory // 1024**2}MB'")
     logger.info(f"Blissful Tuner version {BLISSFUL_VERSION} extended from Musubi Tuner!")
-    logger.info(f"PyTorch: {torch.__version__}, Memory allocation: '{allocator}'")
+    logger.info(f"PyTorch: {torch.__version__}, Memory allocation: '{allocator}', FP8 math capable: '{can_use_fp8}'")
     for string in cuda_list:
         logger.info(string)
 
     if hasattr(args, "optimized") and args.optimized and MODE == "generate":
-        logger.info("Optimized arguments enabled!")
+        logger.info("Optimized arguments enabled! (Still may need to tune '--blocks_to_swap' etc if you OOM)")
         args.fp16_accumulation = True
         args.attn_mode = "sageattn"
         args.compile = True
@@ -96,15 +115,18 @@ def blissful_prefunc(args: argparse.Namespace):
         if DIFFUSION_MODEL == "wan":
             args.rope_func = "comfy"
             args.simple_modulation = True
-        elif DIFFUSION_MODEL in ["hunyuan", "framepack"]:
-            args.fp16_accumulation = False  # Disable this for hunyuan and framepack b/c we enable fp8_fast which offsets it anyway and torch 2.7.0 has issues with compiling hunyuan sometimes
+        elif DIFFUSION_MODEL in ["hunyuan", "framepack"] and can_use_fp8:
             args.fp8_fast = True
         elif DIFFUSION_MODEL == "flux":
             args.compile = False
-            args.fp16_accumulation = False
-            args.fp8_fast = True
+            if can_use_fp8:
+                args.fp8_fast = True
+
+    if hasattr(args, "fp8_fast") and args.fp8_fast and not can_use_fp8:
+        logger.warning("Requested fp8 math (--fp8_fast) but Torch/CUDA reports it's not available so you may encounter errors!")
+
     if hasattr(args, "fp16_accumulation") and args.fp16_accumulation and MODE == "generate":
-        logger.info("Enabling FP16 accumulation")
+        logger.info("Enabling FP16 accumulation...")
         if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
             torch.backends.cuda.matmul.allow_fp16_accumulation = True
         else:
@@ -483,12 +505,16 @@ def add_blissful_k5_args(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     parser.add_argument("--quantized_qwen", action="store_true", help="Quantize Qwen TE to NF4 with BitsAndBytes to save VRAM")
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile optimization")
     parser.add_argument(
-        "--output_type", type=str, default="video", choices=["video", "latent", "both"], help="Type of output to produce."
+        "--output_type",
+        type=str,
+        default="video",
+        choices=["video", "latent", "both"],
+        help="Type of output to save, choose 'video' for decoded video/image, latent for latent.safetensors, both for both!",
     )
     parser.add_argument(
-        "--fp16_accumulation",
+        "--fp16_fast",
         action="store_true",
-        help="Enable full FP16 Accmumulation in FP16 GEMMs and set autocast to FP16 for much better speed at small cost to quality, requires Pytorch 2.7.0 or higher",
+        help="Enable full FP16 Accmumulation in FP16 GEMMs and set autocast/attention dtype to FP16 for much better speed at small cost to quality(works best for Pro, Lite/Image suffer more), requires Pytorch 2.7.0 or higher",
     )
     parser.add_argument(
         "--preview_latent_every",
@@ -520,22 +546,23 @@ def add_blissful_k5_args(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         type=str,
         default="default",
         choices=["default", "dpm++"],
-        help="Scheduler to use for inference, default is probably best right now",
+        help="Scheduler to use for inference, DPM++ can potentially improve outputs slightly but default is usually okay",
     )
     parser.add_argument(
-        "--force_traditional_attn", action="store_true", help="Force Flash/Sage/etc attention even when task requests NABLA"
+        "--use_nabla_attn",
+        action="store_true",
+        help="Use NABLA attention. Block sparse but implementation is fragile and it's not always faster, so if you have issues, stick to traditional attention!",
     )
-    parser.add_argument("--force_nabla_attn", action="store_true", help="Force NABLA attention even when task requests traditional")
     parser.add_argument(
         "--nabla_p",
         type=float,
         default=0.9,
-        help="NABLA P value for when using forced NABLA(ignored if task conf specifies a P value).",
+        help="0.0 - 1.0 (float): NABLA P value for when using NABLA. Controls sparsity with lower being more sparse. 0.7 might be good.",
     )
     parser.add_argument(
         "--disable_vae_workaround",
         action="store_true",
-        help="Disables patching the VAE to fix massive OOM on latest PyTorch/CUDA versions. This patch seems not necessary on at least some earlier versions and quality is potentially improved without it.",
+        help="Disables patching the VAE to fix massive OOM on latest PyTorch/CUDA versions. This patch seems not necessary on at least some earlier versions and quality is potentially improved without it, but will use more VRAM.",
     )
     parser.add_argument(
         "--prompt_wildcards",
@@ -545,4 +572,9 @@ def add_blissful_k5_args(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         "Wildcard files should have one possible replacement per line, optionally with a relative weight attached like red:2.0 or yellow:0.5, and wildcards can be nested.",
     )
     parser.add_argument("--no_metadata", action="store_true", help="Disable saving generation params in latent/mkv")
+    parser.add_argument(
+        "--advanced_i2v",
+        action="store_true",
+        help="Allow much more freedom when preparing latents for I2V or Image Edit i.e. allow any reasonable res which is divisible by 16 without resizing, automatically resizes input images to requested output res. Not compatible with NABLA",
+    )
     return parser

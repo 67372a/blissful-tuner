@@ -2126,8 +2126,11 @@ class NetworkTrainer:
 
         epoch_to_start = 0
         global_step = 0
-        noise_scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
-
+        noise_scheduler = (
+            FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
+            if not args.image_flow_shift
+            else None
+        )
         loss_recorder = train_utils.LossRecorder()
         del train_dataset_group
 
@@ -2221,6 +2224,13 @@ class NetworkTrainer:
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
+                    if args.image_flow_shift is not None:  # Use different flow shift values for images versus video, if provided
+                        if latents.shape[2] == 1:  # Image
+                            noise_scheduler = FlowMatchDiscreteScheduler(shift=args.image_flow_shift, reverse=True, solver="euler")
+                        elif latents.shape[2] > 1:  # Video
+                            noise_scheduler = FlowMatchDiscreteScheduler(
+                                shift=args.discrete_flow_shift, reverse=True, solver="euler"
+                            )
 
                     # calculate model input and timesteps
                     noisy_model_input, timesteps = self.get_noisy_model_input_and_timesteps(
@@ -2772,6 +2782,13 @@ def setup_parser_common() -> argparse.ArgumentParser:
         default=1.0,
         help="Discrete flow shift for the Euler Discrete Scheduler, default is 1.0. / Euler Discrete Schedulerの離散フローシフト、デフォルトは1.0。",
     )
+    parser.add_argument(
+        "--image_flow_shift",
+        type=float,
+        default=None,
+        help="Use a different flow shift value when training images(if provided) / 画像をトレーニングするときに異なるフローシフト値を使用する（提供されている場合）",
+    )
+
     parser.add_argument(
         "--sigmoid_scale",
         type=float,
