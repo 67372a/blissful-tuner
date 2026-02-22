@@ -8,7 +8,7 @@ This is an unofficial training and inference script for [Kandinsky 5](https://gi
 
 - fp8 support and memory reduction by block swap
 - Inference without installing Flash attention (using PyTorch's scaled dot product attention)
-- LoRA training for text-to-video (T2V) and image-to-video (I2V, Pro) models
+- LoRA training for text-to-video (T2V), image-to-video (I2V, Pro) models, and Image (T2I, Edit) models
 
 This feature is experimental.
 
@@ -21,7 +21,7 @@ This feature is experimental.
 
 - fp8対応およびblock swapによる省メモリ化
 - Flash attentionのインストールなしでの実行（PyTorchのscaled dot product attentionを使用）
-- テキストから動画（T2V）および画像から動画（I2V、Pro）モデルのLoRA学習
+- テキストからビデオへの変換 (T2V)、画像からビデオへの変換 (I2V、Pro) モデル、および画像 (T2I、Edit) モデルの LoRA トレーニング
 
 この機能は実験的なものです。
 
@@ -40,8 +40,8 @@ Download a Pro DiT `.safetensors` checkpoint from the Kandinsky 5.0 Collection (
 
 ### VAE
 
-Kandinsky 5 uses the HunyuanVideo 3D VAE. Download `diffusion_pytorch_model.safetensors` (or `pytorch_model.pt`) from:
-https://huggingface.co/hunyuanvideo-community/HunyuanVideo
+Kandinsky 5 uses the HunyuanVideo 3D VAE for video tasks. Download `diffusion_pytorch_model.safetensors` (or `pytorch_model.pt`) from:
+https://huggingface.co/hunyuanvideo-community/HunyuanVideo . Image generation/edit tasks use [Flux 1 VAE](https://huggingface.co/black-forest-labs/FLUX.1-dev/tree/main/vae)
 
 ### Text Encoders / テキストエンコーダ
 
@@ -78,7 +78,8 @@ Hugging Faceの[Kandinsky 5.0 Collection](https://huggingface.co/collections/ai-
 
 **DiTモデル**: 上記のリポジトリから`.safetensors`ファイルをダウンロードしてください。
 
-**VAE**: Kandinsky 5はHunyuanVideo 3D VAEを使用します。上記リンクから`diffusion_pytorch_model.safetensors`（または`pytorch_model.pt`）をダウンロードしてください。
+**VAE**: Kandinsky 5 は、ビデオ タスクに HunyuanVideo 3D VAE を使用します。以下から `diffusion_pytorch_model.safetensors` (または `pytorch_model.pt`) をダウンロードします。
+https://huggingface.co/hunyuanvideo-community/HunyuanVideo 。画像生成/編集タスクでは[Flux 1 VAE](https://huggingface.co/black-forest-labs/FLUX.1-dev/tree/main/vae)を使用します。
 
 **テキストエンコーダ**: Qwen2.5-VL-7BとCLIPを使用します。
 
@@ -105,7 +106,7 @@ The DiT checkpoint must be set explicitly via `--dit` (this overrides the task's
 
 [Kandinsky 5.0 Video Lite models](https://huggingface.co/collections/kandinskylab/kandinsky-50-video-lite) are technically supported, but were not extensively tested. Community feedback is welcome.
 
-[Kandinsky 5.0 Image Lite models](https://huggingface.co/collections/kandinskylab/kandinsky-50-image-lite) are not supported, but support can be implemented if they get active support from the community.
+[Kandinsky 5.0 Image Lite models](https://huggingface.co/collections/kandinskylab/kandinsky-50-image-lite) are also supported but not extensively tested.
 
 <details>
 <summary>日本語</summary>
@@ -113,28 +114,34 @@ The DiT checkpoint must be set explicitly via `--dit` (this overrides the task's
 `--task` オプションでタスク設定（アーキテクチャ、attention、解像度、各種デフォルト値）を選択します。
 DiTのチェックポイントは `--dit` で明示的に指定できます（タスクのデフォルトのパスを上書きします）。
 
-Kandinsky 5.0 Video Liteモデル（https://huggingface.co/collections/kandinskylab/kandinsky-50-video-lite）は技術的にはサポートされていますが、十分な動作確認はできていません。問題があればフィードバックをお願いします。
+[Kandinsky 5.0 Video Liteモデル](https://huggingface.co/collections/kandinskylab/kandinsky-50-video-lite) は技術的にはサポートされていますが、十分な動作確認はできていません。問題があればフィードバックをお願いします。
 
-Kandinsky 5.0 Image Liteモデル（https://huggingface.co/collections/kandinskylab/kandinsky-50-image-lite）は現在サポートしていませんが、コミュニティからの継続的な要望・協力があれば対応可能です。
+[Kandinsky 5.0 Image Lite モデル](https://huggingface.co/collections/kandinskylab/kandinsky-50-image-lite) もサポートされていますが、十分にテストされていません。
 
 </details>
 
 ## Pre-caching / 事前キャッシュ
 
-Pre-caching is required before training. This involves caching both latents and text encoder outputs.
+Pre-caching is required before training. This involves caching both latents and text encoder outputs. Note that caches created for Video Pro and Lite are NOT interchangeable with ones created for Image Lite - attempting to do this will create errors so please remake the cache when switching between image model/video model training e.g. Flux and Hunyuan VAE types.
 
 ### Notes for Kandinsky5 / Kandinsky5の注意点
 
 - You must cache **text encoder outputs** with `kandinsky5_cache_text_encoder_outputs.py` before training.
 - `--text_encoder_qwen` / `--text_encoder_clip` are Hugging Face Transformers models: pass a model ID (recommended) or a local HF snapshot directory.
 - For I2V tasks, the latent cache stores both first and last frame latents (`latents_image`, always two frames) when running `kandinsky5_cache_latents.py`—one cache works for both first-only and first+last conditioning.
+- If you want to train image models (T2I/I2I), you MUST use the Flux VAE and provide `--image_model_training` to `kandinsky5_cache_latents.py`!
+- If you want to train image_edit (I2I), you MUST specify `--image_edit_training` to `'kandinsky5_cache_text_encoder_outputs.py` for the text encoder to see the image properly. Do NOT do this for any other mode including T2I or quality will degrade severely.
 
 <details>
 <summary>日本語</summary>
 
+トレーニング前に事前キャッシュが必要です。これには、潜在出力とテキスト エンコーダー出力の両方のキャッシュが含まれます。 Video Pro および Lite 用に作成されたキャッシュは、Image Lite 用に作成されたキャッシュと互換性がないことに注意してください。これを実行しようとするとエラーが発生するため、画像モデルとビデオ モデルのトレーニングを切り替えるときにキャッシュを再作成してください。 Flux および Hunyuan VAE タイプ。
+
 - 学習前に、`kandinsky5_cache_text_encoder_outputs.py` による **テキストエンコーダ出力のキャッシュ** が必須です。
 - `--text_encoder_qwen` / `--text_encoder_clip` はHugging Face Transformersのモデルです。モデルID（推奨）またはローカルのHF snapshotディレクトリを指定してください。
 - I2Vタスクでは、`kandinsky5_cache_latents.py` 実行時に最初と最後のフレームlatent（`latents_image`、常に2フレーム）もキャッシュされます。1回のキャッシュで first / first+last 両方のモードに対応できます。
+- 画像モデル (T2I/I2I) をトレーニングする場合は、Flux VAE を使用し、`kandinsky5_cache_latents.py` に `--image_model_training` を指定する必要があります。
+- image_edit (I2I) を学習させる場合、テキストエンコーダが画像を正しく認識できるように、`'kandinsky5_cache_text_encoder_outputs.py` に `--image_edit_training` を指定する必要があります。T2I を含む他のモードでは、この操作を行わないでください。そうしないと、画質が著しく低下します。
 
 </details>
 
@@ -146,11 +153,12 @@ Text encoder output pre-caching is required. Create the cache using the followin
 python kandinsky5_cache_text_encoder_outputs.py \
     --dataset_config path/to/dataset.toml \
     --text_encoder_qwen Qwen/Qwen2.5-VL-7B-Instruct \
+    --text_encoder_auto \
     --text_encoder_clip openai/clip-vit-large-patch14 \
     --batch_size 4
 ```
 
-Adjust `--batch_size` according to your available VRAM.
+Adjust `--batch_size` according to your available VRAM. Add `--image_edit_training` ONLY when training for image edit mode.
 
 For additional options, use `python kandinsky5_cache_text_encoder_outputs.py --help`.
 
@@ -159,7 +167,7 @@ For additional options, use `python kandinsky5_cache_text_encoder_outputs.py --h
 
 テキストエンコーダ出力の事前キャッシュは必須です。上のコマンド例を使用してキャッシュを作成してください。
 
-使用可能なVRAMに合わせて `--batch_size` を調整してください。
+使用可能なVRAMに合わせて `--batch_size` を調整してください。画像編集モードのトレーニングを行う場合のみ、`--image_edit_training` を追加します。
 
 その他のオプションは `--help` で確認できます。
 
@@ -184,7 +192,7 @@ python kandinsky5_cache_latents.py \
     --nabla_resize
 ```
 
-If you're running low on VRAM, lower the `--batch_size`.
+If you're running low on VRAM, lower the `--batch_size`. If you want to train T2I/I2I, you MUST specify `--image_model_training` here! For image_edit (I2I) training, the `control_images` in the dataset config are used as the reference(ground truth) image. See [Dataset Config](./dataset_config.md#sample-for-image-dataset-with-control-images) for details.
 
 For additional options, use `python kandinsky5_cache_latents.py --help`.
 
@@ -193,7 +201,7 @@ For additional options, use `python kandinsky5_cache_latents.py --help`.
 
 latentの事前キャッシュは必須です。上のコマンド例を使用してキャッシュを作成してください。
 
-VRAMが足りない場合は、`--batch_size`を小さくしてください。
+VRAMが足りない場合は、`--batch_size`を小さくしてください。T2I/I2I をトレーニングする場合は、ここでも `--image_model_training` を指定する必要があります。image_edit (I2I) トレーニングでは、データセット設定の `control_images` が参照画像（グラウンドトゥルース画像）として使用されます。詳細は [データセット設定](./dataset_config.md#sample-for-image-dataset-with-control-images) を参照してください。
 
 NABLAで学習する場合は、NABLA互換のlatentキャッシュを作成することを推奨します：
 
@@ -218,11 +226,11 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
     --mixed_precision bf16 \
     --dataset_config path/to/dataset.toml \
     --task k5-pro-t2v-5s-sd \
-    --dit path/to/kandinsky5pro_t2v_pretrain_5s.safetensors \
+    --dit path/to/kandinsky5pro_t2v_sft_5s.safetensors \
     --text_encoder_qwen Qwen/Qwen2.5-VL-7B-Instruct \
     --text_encoder_clip openai/clip-vit-large-patch14 \
     --vae path/to/vae/diffusion_pytorch_model.safetensors \
-    --fp8_base \
+    --fp8_base --fp8_scaled \
     --sdpa \
     --gradient_checkpointing \
     --max_data_loader_n_workers 1 \
@@ -238,14 +246,13 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
     --network_alpha 32 \
     --timestep_sampling shift \
     --discrete_flow_shift 5.0 \
-    --output_dir path/to/output \
+    --output_dir path/to/output/folder \
     --output_name k5_lora \
     --save_every_n_epochs 1 \
-    --max_train_epochs 50 \
-    --scheduler_scale 10.0
+    --max_train_epochs 50 
 ```
 
-For I2V training, switch the task and checkpoint to an I2V preset (e.g., `k5-pro-i2v-5s-sd` with `kandinsky5pro_i2v_sft_5s.safetensors`). The latent cache already stores first and last frame latents (`latents_image`, two frames) when you run `kandinsky5_cache_latents.py`, so the same cache covers both first-only and first+last modes—no extra flags are needed beyond picking an I2V task.
+For I2V training, switch the task and checkpoint to an I2V preset (e.g., `k5-pro-i2v-5s-sd` with `kandinsky5pro_i2v_sft_5s.safetensors`). The latent cache already stores first and last frame latents (`latents_image`, two frames) when you run `kandinsky5_cache_latents.py`, so the same cache covers both first-only and first+last modes—no extra flags are needed beyond picking an I2V task. For image models (T2I or I2I), make sure to use the Flux VAE and set the appropriate task (`k5-lite-t2i-hd` or `k5_lite_i2i_hd`) here, as well as passing `--image_model_training` to `kandinsky5_cache_latents.py` when caching the latents in the previous step.
 
 **Note on first+last frame conditioning**: First+last frame training support is experimental. The effectiveness and plausibility of this approach have not yet been thoroughly tested. Feedback and results from community testing are welcome.
 
@@ -268,9 +275,9 @@ For additional options, use `python kandinsky5_train_network.py --help`.
 
 `--gradient_checkpointing` enables gradient checkpointing to reduce VRAM usage.
 
-`--fp8_base` runs DiT in fp8 mode. This can significantly reduce memory consumption but may impact output quality.
+`--fp8_base / --fp8_scaled` runs DiT in fp8 mode. This can significantly reduce memory consumption but may impact output quality.
 
-If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to CPU.
+If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to CPU. If you OOM on encoding prompts or caching for TE, try `--text_encoder_auto` or `--text_encoder_cpu` to run part or all of the Qwen TE on CPU.
 
 `--gradient_checkpointing_cpu_offload` can be used to offload activations to CPU when using gradient checkpointing. This must be used together with `--gradient_checkpointing`.
 
@@ -280,13 +287,12 @@ Use `--sdpa`, `--flash_attn`, `--flash3`, `--sage_attn`, or `--xformers` to cont
 
 ### Kandinsky5-specific Options / Kandinsky5固有オプション
 
-- `--scheduler_scale`: Overrides the task's scheduler scaling factor. This affects the timestep schedule used in sampling/inference and is also stored in the task config used during training.
-- `--offload_dit_during_sampling`: Offloads the DiT model to CPU during sampling (sample generation during training, and in `kandinsky5_generate_video.py`) to reduce peak VRAM usage.
+- `text_encoder_auto`: Use device_map='auto' for Qwen TE to avoid OOM issues.
 - `--i` / `--image`: Init image path for i2v-style seeding in `kandinsky5_generate_video.py`.
 
 **NABLA attention (training):**
 
-- `--force_nabla_attention`: Force NABLA attention regardless of the task default.
+- `--use_nabla_attention`: Use NABLA attention.
 - `--nabla_method`: NABLA binarization method (default `topcdf`).
 - `--nabla_P`: CDF threshold (default `0.9`).
 - `--nabla_wT`, `--nabla_wH`, `--nabla_wW`: STA window sizes (defaults `11`, `3`, `3`).
@@ -317,7 +323,7 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
     --text_encoder_qwen Qwen/Qwen2.5-VL-7B-Instruct \
     --text_encoder_clip openai/clip-vit-large-patch14 \
     --vae path/to/vae/diffusion_pytorch_model.safetensors \
-    --fp8_base \
+    --fp8_base --fp8_scaled \
     --sdpa \
     --gradient_checkpointing \
     --max_data_loader_n_workers 1 \
@@ -336,11 +342,10 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
     --output_dir path/to/output \
     --output_name k5_lora \
     --save_every_n_epochs 1 \
-    --max_train_epochs 50 \
-    --scheduler_scale 10.0
+    --max_train_epochs 50
 ```
 
-I2Vの学習を行う場合は、タスクとチェックポイントをI2V向けプリセットに変更してください（例: `k5-pro-i2v-5s-sd` と `kandinsky5pro_i2v_sft_5s.safetensors`）。`kandinsky5_cache_latents.py` でlatentをキャッシュする際に、最初のフレームlatent（`latents_image`）も保存されるため、I2V専用の追加フラグは不要です（I2Vタスクを選ぶだけで動作します）。
+I2Vの学習を行う場合は、タスクとチェックポイントをI2V向けプリセットに変更してください（例: `k5-pro-i2v-5s-sd` と `kandinsky5pro_i2v_sft_5s.safetensors`）。`kandinsky5_cache_latents.py` でlatentをキャッシュする際に、最初のフレームlatent（`latents_image`）も保存されるため、I2V専用の追加フラグは不要です（I2Vタスクを選ぶだけで動作します）。画像モデル (T2I または I2I) の場合は、必ず Flux VAE を使用して適切なタスク (`k5-lite-t2i-hd` または `k5_lite_i2i_hd`) を設定し、前の手順で潜在変数をキャッシュするときに `--image_model_training` を `kandinsky5_cache_latents.py` に渡すようにしてください。
 
 **最初と最後のフレーム条件付けについて**: 最初と最後のフレーム学習サポートは実験的なものです。このアプローチの有効性と妥当性はまだ十分にテストされていません。コミュニティからのフィードバックと結果をお待ちしています。
 
@@ -359,9 +364,9 @@ I2Vの学習を行う場合は、タスクとチェックポイントをI2V向�
 
 `--gradient_checkpointing`でgradient checkpointingを有効にし、VRAM使用量を削減できます。
 
-`--fp8_base`を指定すると、DiTがfp8で学習されます。消費メモリを大きく削減できますが、品質は低下する可能性があります。
+`--fp8_base / --fp8_scaled`を指定すると、DiTがfp8で学習されます。消費メモリを大きく削減できますが、品質は低下する可能性があります。
 
-VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブロックをCPUにオフロードしてください。
+VRAMが不足している場合は、`--blocks_to_swap` を使用して一部のブロックを CPU にオフロードしてください。エンコードプロンプトや TE のキャッシュでメモリオーバーフローが発生する場合は、`--text_encoder_auto` または `--text_encoder_cpu` を使用して、Qwen TE の一部またはすべてを CPU で実行してみてください。
 
 `--gradient_checkpointing_cpu_offload`を指定すると、gradient checkpointing使用時にアクティベーションをCPUにオフロードします。`--gradient_checkpointing`と併用する必要があります。
 
@@ -371,13 +376,12 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 
 **Kandinsky5固有オプション**
 
-- `--scheduler_scale`: タスクの`scheduler_scale`を上書きします。サンプリング/推論で使うタイムステップスケジュールに影響します。
-- `--offload_dit_during_sampling`: サンプル生成時（学習中のサンプリング、および `kandinsky5_generate_video.py`）にDiTをCPUへ退避し、ピークVRAMを下げます。
+- `text_encoder_auto`: OOM の問題を回避するには、Qwen TE に device_map='auto' を使用します。
 - `--i` / `--image`: `kandinsky5_generate_video.py` でi2v風の初期画像（1フレーム目のシード）を指定します。
 
 **NABLAアテンション（学習）**
 
-- `--force_nabla_attention`: タスク設定に関係なくNABLAを強制します。
+- `--use_nabla_attention`: タスク設定に関係なくNABLAを強制します。
 - `--nabla_method`: NABLAの二値化メソッド（デフォルト `topcdf`）。
 - `--nabla_P`: CDFしきい値（デフォルト `0.9`）。
 - `--nabla_wT`, `--nabla_wH`, `--nabla_wW`: STAウィンドウ（デフォルト `11`, `3`, `3`）。
@@ -400,23 +404,23 @@ Generate videos using the following command:
 ```bash
 python kandinsky5_generate_video.py \
     --task k5-pro-t2v-5s-sd \
-    --dit path/to/kandinsky5pro_t2v_pretrain_5s.safetensors \
+    --dit path/to/kandinsky5pro_t2v_sft_5s.safetensors \
     --vae path/to/vae/diffusion_pytorch_model.safetensors \
     --text_encoder_qwen Qwen/Qwen2.5-VL-7B-Instruct \
+    --text_encoder_auto \
     --text_encoder_clip openai/clip-vit-large-patch14 \
-    --offload_dit_during_sampling \
-    --fp8_base \
+    --fp8_scaled \
     --dtype bfloat16 \
     --prompt "A cat walks on the grass, realistic style." \
     --negative_prompt "low quality, artifacts" \
-    --frames 17 \
+    --video_length 121 \
     --steps 50 \
-    --guidance 5 \
+    --guidance_scale 5 \
     --scheduler_scale 10 \
     --seed 42 \
     --width 512 \
     --height 512 \
-    --output path/to/output.mp4 \
+    --save_path path/to/output/folder/ \
     --lora_weight path/to/lora.safetensors \
     --lora_multiplier 1.0
 ```
@@ -426,18 +430,19 @@ python kandinsky5_generate_video.py \
 - `--task`: Model configuration
 - `--prompt`: Text prompt for generation
 - `--negative_prompt`: Negative prompt (optional)
-- `--output`: Output file path (.mp4 for video, .png for image)
+- `--save_path`: Output folder path
 - `--width`, `--height`: Output resolution (defaults from task config)
-- `--frames`: Number of frames (defaults from task config)
+- `--video_length`: Number of video frames to generate (exclusive of `--frames`)
+- `--frames`: Number of latent frames to generate (exclusive of `--video_length`)
 - `--steps`: Number of inference steps (defaults from task config)
-- `--guidance`: Guidance scale (defaults from task config)
+- `--guidance_scale`: Guidance scale (defaults from task config)
 - `--seed`: Random seed
-- `--fp8_base`: Run DiT in fp8 mode
+- `--fp8_scaled`: Use fp8 scaled quantization to reduce size of DiT and save memory/VRAM
 - `--blocks_to_swap`: Number of blocks to offload to CPU
 - `--lora_weight`: Path(s) to LoRA weight file(s)
 - `--lora_multiplier`: LoRA multiplier(s)
 
-For additional options, use `python kandinsky5_generate_video.py --help`.
+Additional tasks such as Lite and Image tasks are also available as well as various speed optimizations. For a complete list of available flags, please see `python kandinsky5_generate_video.py --help`.
 
 <details>
 <summary>日本語</summary>
@@ -449,18 +454,19 @@ For additional options, use `python kandinsky5_generate_video.py --help`.
 - `--task`: モデル設定
 - `--prompt`: 生成用のテキストプロンプト
 - `--negative_prompt`: ネガティブプロンプト（オプション）
-- `--output`: 出力ファイルパス（動画は.mp4、画像は.png）
+- `--save_path`: 出力フォルダのパス
 - `--width`, `--height`: 出力解像度（タスク設定からのデフォルト）
-- `--frames`: フレーム数（タスク設定からのデフォルト）
+- `--video_length`: 生成するビデオフレーム数（`--frames` を除く）
+- `--frames`: 生成する潜在フレーム数（`--video_length` を除く）
 - `--steps`: 推論ステップ数（タスク設定からのデフォルト）
-- `--guidance`: ガイダンススケール（タスク設定からのデフォルト）
+- `--guidance_scale`: ガイダンススケール（タスク設定からのデフォルト）
 - `--seed`: ランダムシード
-- `--fp8_base`: DiTをfp8モードで実行
+- `--fp8_scaled`: fp8スケールの量子化を使用してDiTのサイズを縮小し、メモリ/VRAMを節約します
 - `--blocks_to_swap`: CPUにオフロードするブロック数
 - `--lora_weight`: LoRA重みファイルへのパス
 - `--lora_multiplier`: LoRA係数
 
-その他のオプションは `--help` で確認できます。
+LiteタスクやImageタスクなどの追加タスクに加え、様々な速度最適化も利用可能です。利用可能なフラグの完全なリストについては、`python kandinsky5_generate_video.py --help` を参照してください。
 
 </details>
 
