@@ -46,7 +46,8 @@ import musubi_tuner.networks.lora as lora_module
 from musubi_tuner.dataset.config_utils import BlueprintGenerator, ConfigSanitizer
 from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO, ARCHITECTURE_HUNYUAN_VIDEO_FULL
 from musubi_tuner.hv_generate_video import save_images_grid, save_videos_grid, resize_image_to_bucket, encode_to_latents
-
+from blissful_tuner.blissful_core import get_current_model_type, blissful_prefunc, get_current_version
+from blissful_tuner.sdscripts_custom_train_functions import pyramid_noise_like, apply_noise_offset
 from blissful_tuner.blissful_logger import BlissfulLogger
 from ramtorch.helpers import replace_linear_with_ramtorch
 
@@ -379,6 +380,8 @@ class NetworkTrainer:
         self.num_timestep_buckets: Optional[int] = None  # for get_bucketed_timestep()
         self.vae_frame_stride = 4  # all architectures require frames to be divisible by 4, except Qwen-Image-Layered
         self.default_discrete_flow_shift = 14.5  # default value for discrete flow shift for all models TODO may be None is better
+        self.model_type = get_current_model_type()
+        self.tunerver = get_current_version()
 
     # TODO 他のスクリプトと共通化する
     def generate_step_logs(
@@ -894,6 +897,7 @@ class NetworkTrainer:
                     if mid_mask.any():
                         mid_count = mid_mask.sum().item()
                         h, w = latents.shape[-2:]
+
                         if args.timestep_sampling == "qinglong_flux":
                             mu = train_utils.get_lin_function(y1=0.5, y2=1.15)((h // 2) * (w // 2))
                         elif args.timestep_sampling == "qinglong_qwen":
@@ -1652,6 +1656,7 @@ class NetworkTrainer:
     # endregion model specific
 
     def train(self, args):
+        blissful_prefunc(args)
         if torch.cuda.is_available():
             if args.cuda_allow_tf32:
                 torch.backends.cuda.matmul.allow_tf32 = True
@@ -1674,13 +1679,10 @@ class NetworkTrainer:
                 " / SageAttentionは現在学習をサポートしていないようです。`--sdpa`や`--xformers`などの他のオプションを使ってください"
             )
 
-        if args.fp16_accumulation:
-            logger.info("Enabling FP16 accumulation")
-            if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
-                logger.warning("FP16 accumulation is /not/ recommended when training due to degraded quality!")
-                torch.backends.cuda.matmul.allow_fp16_accumulation = True
-            else:
-                logger.warning("FP16 accumulation not available! Requires at least PyTorch 2.7.0")
+        if args.adaptive_noise_scale is not None and args.noise_offset is None:
+            raise ValueError(
+                "adaptive_noise_scale requires noise_offset / adaptive_noise_scaleを使用するにはnoise_offsetが必要です"
+            )
 
         if args.disable_numpy_memmap:
             logger.info(
@@ -2064,6 +2066,12 @@ class NetworkTrainer:
             "ss_timestep_sampling": args.timestep_sampling,
             "ss_sigmoid_scale": args.sigmoid_scale,
             "ss_discrete_flow_shift": args.discrete_flow_shift,
+            "ss_noise_offset": args.noise_offset,
+            "ss_multires_noise_iterations": args.multires_noise_iterations,
+            "ss_multires_noise_discount": args.multires_noise_discount,
+            "ss_adaptive_noise_scale": args.adaptive_noise_scale,
+            "ss_noise_offset_random_strength": args.noise_offset_random_strength,
+            "bt_tunerver": self.tunerver,
         }
 
         datasets_metadata = []
@@ -2126,11 +2134,8 @@ class NetworkTrainer:
 
         epoch_to_start = 0
         global_step = 0
-        noise_scheduler = (
-            FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
-            if not args.image_flow_shift
-            else None
-        )
+        noise_scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
+
         loss_recorder = train_utils.LossRecorder()
         del train_dataset_group
 
@@ -2199,6 +2204,15 @@ class NetworkTrainer:
         logger.info(
             f"DiT dtype: {first_param.dtype if first_param is not None else None}, device: {first_param.device if first_param is not None else accelerator.device}"
         )
+        if args.multires_noise_iterations:
+            logger.info(
+                f"Multires noise enabled - Iterations: {args.multires_noise_iterations}, Discount: {args.multires_noise_discount}"
+            )
+
+        if args.noise_offset:
+            logger.info(
+                f"Noise offset enabled - Value: {args.noise_offset}, Random offset: {args.noise_offset_random_strength}{f', Adaptive: {args.adaptive_noise_scale}' if args.adaptive_noise_scale else ''}"
+            )
 
         clean_memory_on_device(accelerator.device)
 
@@ -2224,11 +2238,25 @@ class NetworkTrainer:
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
-                    if args.image_flow_shift is not None:  # Use different flow shift values for images versus video, if provided
+
+                    if args.noise_offset:  # Ported/adapted from sd-scripts
+                        if args.noise_offset_random_strength:
+                            noise_offset = torch.rand(1, device=latents.device) * args.noise_offset
+                        else:
+                            noise_offset = args.noise_offset
+                        noise = apply_noise_offset(latents, noise, noise_offset, args.adaptive_noise_scale)
+
+                    if args.multires_noise_iterations:  # Ditto
+                        noise = pyramid_noise_like(
+                            noise, latents.device, args.multires_noise_iterations, args.multires_noise_discount
+                        )
+
+                    if args.image_flow_shift is not None and latents.dim() == 5:
+                        # Use different flow shift values for images versus video, if provided
                         if latents.shape[2] == 1:  # Image
                             noise_scheduler = FlowMatchDiscreteScheduler(shift=args.image_flow_shift, reverse=True, solver="euler")
                         elif latents.shape[2] > 1:  # Video
-                            noise_scheduler = FlowMatchDiscreteScheduler(
+                            noise_scheduler = FlowMatchDiscreteScheduler(  # Really, ruff?
                                 shift=args.discrete_flow_shift, reverse=True, solver="euler"
                             )
 
@@ -2244,6 +2272,7 @@ class NetworkTrainer:
                     model_pred, target = self.call_dit(
                         args, accelerator, transformer, latents, batch, noise, noisy_model_input, timesteps, network_dtype
                     )
+
                     loss = torch.nn.functional.mse_loss(model_pred.to(network_dtype), target, reduction="none")
 
                     if weighting is not None:
@@ -2516,7 +2545,7 @@ def setup_parser_common() -> argparse.ArgumentParser:
         action="store_true",
         help="persistent DataLoader workers (useful for reduce time gap between epoch, but may use more memory) / DataLoader のワーカーを持続させる (エポック間の時間差を少なくするのに有効だが、より多くのメモリを消費する可能性がある)",
     )
-    parser.add_argument("--seed", type=int, default=None, help="random seed for training / 学習時の乱数のseed")
+    parser.add_argument("--seed", type=str, default=None, help="random seed for training / 学習時の乱数のseed")
     parser.add_argument(
         "--gradient_checkpointing", action="store_true", help="enable gradient checkpointing / gradient checkpointingを有効にする"
     )
@@ -2786,7 +2815,10 @@ def setup_parser_common() -> argparse.ArgumentParser:
         "--image_flow_shift",
         type=float,
         default=None,
-        help="Use a different flow shift value when training images(if provided) / 画像をトレーニングするときに異なるフローシフト値を使用する（提供されている場合）",
+        help=(
+            "If supplied, uses a different flow shift value for images when training images and video together. Only valid for video models!"
+            "指定した場合、画像とビデオを一緒にトレーニングするときに、画像に異なるフロー シフト値を使用します。ビデオ モデルにのみ有効です。"
+        ),
     )
 
     parser.add_argument(
@@ -3093,6 +3125,36 @@ def setup_parser_common() -> argparse.ArgumentParser:
         action="store_true",
         help="Use RamTorch to reduce GPU memory usage by keeping network weights on CPU.",
     )
+    
+    parser.add_argument(
+        "--multires_noise_iterations",
+        type=int,
+        default=None,
+        help="enable multires noise with this number of iterations (if enabled, around 6-10 is recommended) / Multires noiseを有効にしてこのイテレーション数を設定する（有効にする場合は6-10程度を推奨）",
+    )
+    parser.add_argument(
+        "--multires_noise_discount",
+        type=float,
+        default=0.3,
+        help="set discount value for multires noise (has no effect without --multires_noise_iterations) / Multires noiseのdiscount値を設定する（--multires_noise_iterations指定時のみ有効）",
+    )
+    parser.add_argument(
+        "--noise_offset",
+        type=float,
+        default=None,
+        help="enable noise offset with this value (if enabled, around 0.1 is recommended) / Noise offsetを有効にしてこの値を設定する（有効にする場合は0.1程度を推奨）",
+    )
+    parser.add_argument(
+        "--noise_offset_random_strength",
+        action="store_true",
+        help="use random strength between 0~noise_offset for noise offset. / noise offsetにおいて、0からnoise_offsetの間でランダムな強度を使用します。",
+    )
+    parser.add_argument(
+        "--adaptive_noise_scale",
+        type=float,
+        default=None,
+        help="add `latent mean absolute value * this value` to noise_offset (disabled if None, default) / latentの平均値の絶対値 * この値をnoise_offsetに加算する（Noneの場合は無効、デフォルト）",
+    )
     return parser
 
 
@@ -3159,6 +3221,7 @@ def main():
 
     args = parser.parse_args()
     args = read_config_from_file(args, parser)
+
     trainer = NetworkTrainer()
     trainer.train(args)
 
