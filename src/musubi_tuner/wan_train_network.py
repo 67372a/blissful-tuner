@@ -725,12 +725,14 @@ class WanNetworkTrainer(NetworkTrainer):
         seq_len = lat_f * lat_h * lat_w // (self.config.patch_size[0] * self.config.patch_size[1] * self.config.patch_size[2])
         latents = latents.to(device=accelerator.device, dtype=network_dtype)
         noisy_model_input = noisy_model_input.to(device=accelerator.device, dtype=network_dtype)
+
+        # Compute flow matching target before model forward so latents/noise can be freed from VRAM
+        target = noise.to(device=accelerator.device, dtype=network_dtype) - latents
+        del noise, latents
+
         with accelerator.autocast():
             model_pred = model(noisy_model_input, t=timesteps, context=context, clip_fea=clip_fea, seq_len=seq_len, y=image_latents)
         model_pred = torch.stack(model_pred, dim=0)  # list to tensor
-
-        # flow matching loss
-        target = noise - latents
 
         return model_pred, target
 

@@ -589,7 +589,7 @@ class WanAttentionBlock(nn.Module):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
-            e(Tensor): Shape [B, 6, C] for 2.1, [B, L, 6, C] for 2.2
+            e(Tensor): Shape [B, 6, C] for 2.1, [B, L, 6, C] or [B, 1, 6, C] (compact) for 2.2
             seq_lens(Tensor): Shape [B], length of each sequence in batch
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
@@ -651,7 +651,7 @@ class Head(nn.Module):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
-            e(Tensor): Shape [B, C] for 2.1, [B, L, C] for 2.2
+            e(Tensor): Shape [B, C] for 2.1, [B, L, C] or [B, 1, C] (compact) for 2.2
         """
         if self.model_version == "2.1" or self.simple_modulation:
             e = (self.modulation.to(self.attention_dtype, copy=False) + e.unsqueeze(1)).chunk(2, dim=1)
@@ -981,6 +981,9 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         img_ids[:, :, :, 2] = img_ids[:, :, :, 2] + torch.linspace(0, w_len - 1, steps=w_len, device=x.device, dtype=x.dtype).reshape(1, 1, -1)
         return img_ids
 
+    _FREQS_CACHE_MAX_SIZE = 512  # Limit cache to prevent unbounded VRAM growth. Typical training may have
+    # up to ~40 spatial buckets x ~9 frame lengths = ~360 unique (F,H,W) combos, so 512 gives comfortable headroom.
+
     def get_patch_embedding(self, x, f_indices, seq_len):
         _, F, H, W = x[0].shape
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]  # x[0].shape = [1, 5120, F, H, W]
@@ -993,6 +996,10 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
                 if f_indices is not None:
                     fhw = tuple(list(fhw) + f_indices[i])  # add f_indices to fhw for cache key
                 if fhw not in self.freqs_fhw:
+                    # Evict oldest entries if cache is full
+                    if len(self.freqs_fhw) >= self._FREQS_CACHE_MAX_SIZE:
+                        oldest_key = next(iter(self.freqs_fhw))
+                        del self.freqs_fhw[oldest_key]
                     c = self.dim // self.num_heads // 2
                     self.freqs_fhw[fhw] = calculate_freqs_i(fhw, c, self.freqs, None if f_indices is None else f_indices[i])
                 freqs_list.append(self.freqs_fhw[fhw])
@@ -1014,12 +1021,20 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             e0 = self.time_projection(e).unflatten(1, (6, self.dim)).to(self.e_dtype, copy=False)
         else:  # For Wan2.2
             if t.dim() == 1:
-                # t = t.expand(t.size(0), seq_len) # this should be a bug in the original code
-                t = t.unsqueeze(1).expand(-1, seq_len)
-            bt = t.size(0)
-            t = t.flatten()
-            e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).unflatten(0, (bt, seq_len))).to(self.e_dtype)
-            e0 = self.time_projection(e).unflatten(2, (6, self.dim)).to(self.e_dtype)
+                # VRAM optimization: when timestep is uniform across all tokens (1D input),
+                # use compact [B, 1, dim] representation instead of [B, seq_len, dim].
+                # Broadcasting handles per-token operations in attention blocks and head.
+                # This saves ~2.5GB+ of VRAM for 14B models compared to full expansion.
+                bt = t.size(0)
+                e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t)).to(self.e_dtype)
+                e = e.unsqueeze(1)  # [B, 1, dim]
+                e0 = self.time_projection(e).unflatten(2, (6, self.dim)).to(self.e_dtype)  # [B, 1, 6, dim]
+            else:
+                # Per-token timesteps: full expansion (fallback for 2D t inputs)
+                bt = t.size(0)
+                t = t.flatten()
+                e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).unflatten(0, (bt, seq_len))).to(self.e_dtype)
+                e0 = self.time_projection(e).unflatten(2, (6, self.dim)).to(self.e_dtype)
         return e, e0
 
     def blissful_optimize(self):
