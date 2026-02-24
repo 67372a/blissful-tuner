@@ -33,7 +33,7 @@ from musubi_tuner.hv_train_network import (
 import logging
 
 from musubi_tuner.qwen_image_train_network import QwenImageNetworkTrainer
-from musubi_tuner.utils import huggingface_utils, model_utils, sai_model_spec, train_utils
+from musubi_tuner.utils import huggingface_utils, model_utils, sai_model_spec, train_utils, loss_utils
 from musubi_tuner.utils.device_utils import synchronize_device
 from musubi_tuner.utils.safetensors_utils import MemoryEfficientSafeOpen, load_safetensors, mem_eff_save_file
 
@@ -619,7 +619,13 @@ class QwenImageTrainer(QwenImageNetworkTrainer):
                     model_pred, target = self.call_dit(
                         args, accelerator, transformer, latents, batch, noise, noisy_model_input, timesteps, dit_dtype
                     )
-                    loss = torch.nn.functional.mse_loss(model_pred.to(dit_dtype), target, reduction="none")
+
+                    # Float64 for grokking
+                    model_pred = model_pred.to(torch.float64)
+                    target = target.to(torch.float64)
+
+                    loss = loss_utils.conditional_loss(model_pred, target, loss_type=args.loss_type, delta_beta=float(args.loss_delta_beta) if args.loss_delta_beta is not None else None)
+
 
                     if weighting is not None:
                         loss = loss * weighting
@@ -767,6 +773,21 @@ def qwen_image_finetune_setup_parser(parser: argparse.ArgumentParser) -> argpars
         "--mem_eff_save",
         action="store_true",
         help="Enable memory efficient saving (saving states requires use normal saving, so it takes same amount of memory even with this option enabled)",
+    )
+
+    parser.add_argument(
+        "--loss_type",
+        type=str,
+        default="l2",
+        choices=["l1", "l2", "pseudo_huber", "huber", "smooth_l1", "scaled_quadratic", "smooth_l2"],
+        help="The type of loss function to use: l1, l2, pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2. Default is l2.",
+    )
+
+    parser.add_argument(
+        "--loss_delta_beta",
+        type=float,
+        default=None,
+        help="The delta or beta for loss types that accept it: pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2",
     )
     return parser
 

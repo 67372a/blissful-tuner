@@ -325,8 +325,13 @@ class ZImageNetworkTrainer(NetworkTrainer):
         # model_pred: [B, C, F, H, W]
         model_pred = model_pred.squeeze(2)  # [B, C, H, W]
 
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         # Target: Opposite of usual Flow matching
         target = latents - noise
+        del noise, latents
 
         return model_pred, target
 

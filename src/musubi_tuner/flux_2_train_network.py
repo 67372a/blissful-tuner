@@ -326,9 +326,12 @@ class Flux2NetworkTrainer(NetworkTrainer):
         # unpack height/width latents
         model_pred = rearrange(model_pred, "b (h w) c -> b c h w", h=packed_latent_height, w=packed_latent_width)
 
-        # flow matching loss
-        latents = latents.to(device=accelerator.device, dtype=network_dtype)
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         target = noise - latents
+        del noise, latents
 
         return model_pred, target
 

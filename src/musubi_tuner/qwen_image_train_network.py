@@ -574,8 +574,13 @@ class QwenImageNetworkTrainer(NetworkTrainer):
         )
 
         # flow matching loss
-        latents = latents.to(device=accelerator.device, dtype=network_dtype)
+        
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         target = noise - latents
+        del noise, latents
 
         # print(model_pred.dtype, target.dtype)
         return model_pred, target

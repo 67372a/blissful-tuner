@@ -51,7 +51,7 @@ from blissful_tuner.sdscripts_custom_train_functions import pyramid_noise_like, 
 from blissful_tuner.blissful_logger import BlissfulLogger
 from ramtorch.helpers import replace_linear_with_ramtorch
 
-from musubi_tuner.utils import huggingface_utils, model_utils, train_utils, sai_model_spec
+from musubi_tuner.utils import huggingface_utils, model_utils, train_utils, sai_model_spec, loss_utils
 
 logger = BlissfulLogger(__name__, "green")
 
@@ -2273,7 +2273,11 @@ class NetworkTrainer:
                         args, accelerator, transformer, latents, batch, noise, noisy_model_input, timesteps, network_dtype
                     )
 
-                    loss = torch.nn.functional.mse_loss(model_pred.to(network_dtype), target, reduction="none")
+                    # Float64 for grokking
+                    model_pred = model_pred.to(torch.float64)
+                    target = target.to(torch.float64)
+
+                    loss = loss_utils.conditional_loss(model_pred, target, loss_type=args.loss_type, delta_beta=float(args.loss_delta_beta) if args.loss_delta_beta is not None else None)
 
                     if weighting is not None:
                         loss = loss * weighting
@@ -3154,6 +3158,21 @@ def setup_parser_common() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="add `latent mean absolute value * this value` to noise_offset (disabled if None, default) / latentの平均値の絶対値 * この値をnoise_offsetに加算する（Noneの場合は無効、デフォルト）",
+    )
+
+    parser.add_argument(
+        "--loss_type",
+        type=str,
+        default="l2",
+        choices=["l1", "l2", "pseudo_huber", "huber", "smooth_l1", "scaled_quadratic", "smooth_l2"],
+        help="The type of loss function to use: l1, l2, pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2. Default is l2.",
+    )
+
+    parser.add_argument(
+        "--loss_delta_beta",
+        type=float,
+        default=None,
+        help="The delta or beta for loss types that accept it: pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2",
     )
     return parser
 

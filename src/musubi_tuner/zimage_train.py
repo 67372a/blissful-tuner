@@ -33,7 +33,7 @@ from musubi_tuner.hv_train_network import (
 import logging
 
 from musubi_tuner.zimage_train_network import ZImageNetworkTrainer
-from musubi_tuner.utils import huggingface_utils, model_utils, sai_model_spec, train_utils
+from musubi_tuner.utils import huggingface_utils, model_utils, sai_model_spec, train_utils, loss_utils
 from musubi_tuner.utils.safetensors_utils import mem_eff_save_file
 
 logger = logging.getLogger(__name__)
@@ -530,7 +530,12 @@ class ZImageTrainer(ZImageNetworkTrainer):
                     model_pred, target = self.call_dit(
                         args, accelerator, transformer, latents, batch, noise, noisy_model_input, timesteps, dit_dtype
                     )
-                    loss = torch.nn.functional.mse_loss(model_pred.to(dit_dtype), target.to(dit_dtype), reduction="none")
+
+                    # Float64 for grokking
+                    model_pred = model_pred.to(torch.float64)
+                    target = target.to(torch.float64)
+
+                    loss = loss_utils.conditional_loss(model_pred, target, loss_type=args.loss_type, delta_beta=float(args.loss_delta_beta) if args.loss_delta_beta is not None else None)
 
                     if weighting is not None:
                         loss = loss * weighting
@@ -686,6 +691,21 @@ def zimage_finetune_setup_parser(parser: argparse.ArgumentParser) -> argparse.Ar
         action="store_true",
         help="Patch optimizer parameters for block swap when blocks_to_swap > 0. Only works for some optimizers. Not needed when using --fused_backward_pass."
         + " / ブロックスワップを使用しているときに、optimizer.stepがエラーになるのを回避するためパッチ。一部のoptimizerでのみ動作します。--fused_backward_passを使用しているときは指定不要です。",
+    )
+
+    parser.add_argument(
+        "--loss_type",
+        type=str,
+        default="l2",
+        choices=["l1", "l2", "pseudo_huber", "huber", "smooth_l1", "scaled_quadratic", "smooth_l2"],
+        help="The type of loss function to use: l1, l2, pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2. Default is l2.",
+    )
+
+    parser.add_argument(
+        "--loss_delta_beta",
+        type=float,
+        default=None,
+        help="The delta or beta for loss types that accept it: pseudo_huber, huber, smooth_l1, scaled_quadratic, smooth_l2",
     )
     return parser
 

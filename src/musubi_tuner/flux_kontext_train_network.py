@@ -360,8 +360,12 @@ class FluxKontextNetworkTrainer(NetworkTrainer):
             model_pred, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=packed_latent_height, w=packed_latent_width, ph=2, pw=2
         )
 
-        # flow matching loss
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         target = noise - latents
+        del noise, latents
 
         return model_pred, target
 

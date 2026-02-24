@@ -454,7 +454,14 @@ class HunyuanVideo15NetworkTrainer(NetworkTrainer):
 
         # Flow matching target: predict the velocity (noise - clean)
         # This is different from DDPM which predicts noise directly
+
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+        
         target = noise - latents
+        del noise, latents
+
         return model_pred, target
 
     # endregion model specific

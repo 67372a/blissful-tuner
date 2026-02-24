@@ -580,8 +580,12 @@ class FramePackNetworkTrainer(NetworkTrainer):
             )
             model_pred = model_pred[0]  # returns tuple (model_pred, )
 
-        # flow matching loss
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         target = noise - latents
+        del noise, latents
 
         return model_pred, target
 

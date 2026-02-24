@@ -723,11 +723,14 @@ class WanNetworkTrainer(NetworkTrainer):
         # call DiT
         lat_f, lat_h, lat_w = latents.shape[2:5]
         seq_len = lat_f * lat_h * lat_w // (self.config.patch_size[0] * self.config.patch_size[1] * self.config.patch_size[2])
-        latents = latents.to(device=accelerator.device, dtype=network_dtype)
         noisy_model_input = noisy_model_input.to(device=accelerator.device, dtype=network_dtype)
 
+        # Float64 for grokking
+        latents = latents.to(device=accelerator.device, dtype=torch.float64)
+        noise = noise.to(device=accelerator.device, dtype=torch.float64)
+
         # Compute flow matching target before model forward so latents/noise can be freed from VRAM
-        target = noise.to(device=accelerator.device, dtype=network_dtype) - latents
+        target = noise - latents
         del noise, latents
 
         with accelerator.autocast():
