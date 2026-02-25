@@ -1020,17 +1020,21 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t.flatten())).to(self.e_dtype)
             e0 = self.time_projection(e).unflatten(1, (6, self.dim)).to(self.e_dtype, copy=False)
         else:  # For Wan2.2
-            if t.dim() == 1:
+            compact = getattr(self, "compact_time_embedding", True)
+            if compact and t.dim() == 1:
                 # VRAM optimization: when timestep is uniform across all tokens (1D input),
                 # use compact [B, 1, dim] representation instead of [B, seq_len, dim].
                 # Broadcasting handles per-token operations in attention blocks and head.
                 # This saves ~2.5GB+ of VRAM for 14B models compared to full expansion.
+                # Disable with --no_compact_time_embedding if needed.
                 bt = t.size(0)
                 e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t)).to(self.e_dtype)
                 e = e.unsqueeze(1)  # [B, 1, dim]
                 e0 = self.time_projection(e).unflatten(2, (6, self.dim)).to(self.e_dtype)  # [B, 1, 6, dim]
             else:
-                # Per-token timesteps: full expansion (fallback for 2D t inputs)
+                # Full per-token expansion (original behavior, or fallback for 2D t inputs)
+                if t.dim() == 1:
+                    t = t.unsqueeze(1).expand(-1, seq_len)
                 bt = t.size(0)
                 t = t.flatten()
                 e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).unflatten(0, (bt, seq_len))).to(self.e_dtype)

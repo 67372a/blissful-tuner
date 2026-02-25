@@ -502,6 +502,12 @@ class WanNetworkTrainer(NetworkTrainer):
         # if args.force_v2_1_time_embedding:
         #    model.set_time_embedding_v2_1(True)
 
+        # Set compact time embedding flag (VRAM optimization for Wan 2.2)
+        compact = getattr(args, "compact_time_embedding", True)
+        model.compact_time_embedding = compact
+        if compact and model.model_version == "2.2" and not model.simple_modulation:
+            logger.info("Using compact time embedding for Wan 2.2 (saves ~2.5GB+ VRAM). Disable with --no_compact_time_embedding")
+
         if self.high_low_training:
             # load high noise model
             logger.info(f"Loading high noise model from {self.dit_high_noise_path}")
@@ -807,6 +813,14 @@ def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         help="Torch.compile settings for --optimized_compile. NOT for --dynamo_backend!",
     )
     parser.add_argument("--disable_blockwise_quant", action="store_true", help="Disable blockwise quantization (experimental).")
+    parser.add_argument(
+        "--no_compact_time_embedding",
+        action="store_true",
+        default=False,
+        help="Disable compact time embedding optimization for Wan 2.2. The optimization saves ~2.5GB+ VRAM by avoiding "
+        "per-token expansion of time embeddings when timesteps are uniform (which is always the case in training). "
+        "Disable this only if you suspect it causes issues.",
+    )
     return parser
 
 
@@ -831,6 +845,7 @@ def main():
 
     if args.force_v2_1_time_embedding:
         args.simple_modulation = True  # Redirect Musubi flag to existing Blissful flag
+    args.compact_time_embedding = not args.no_compact_time_embedding
     trainer = WanNetworkTrainer()
     trainer.train(args)
 
