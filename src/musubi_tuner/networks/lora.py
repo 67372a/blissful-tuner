@@ -179,6 +179,7 @@ class LoRAModule(torch.nn.Module):
 
         del self.org_module
 
+    @torch.compiler.disable()
     def _ramtorch_org_forward(self, x):
         """Forward pass for RamTorch modules that avoids BouncingLinearFn.apply().
 
