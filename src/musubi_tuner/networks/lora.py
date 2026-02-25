@@ -40,6 +40,7 @@ class AsyncTensorStreamer:
         self.buffers = [None] * self.num_buffers
         self.compute_done_events = [torch.cuda.Event() for _ in range(self.num_buffers)]
 
+    @torch.compiler.disable()
     def transfer(self, tensor_cpu: torch.Tensor):
         if not tensor_cpu.is_pinned():
             tensor_cpu = tensor_cpu.pin_memory()
@@ -69,6 +70,7 @@ class AsyncTensorStreamer:
 _STREAMERS = {}
 
 
+@torch.compiler.disable()
 def transfer_ramtensor_to_device(tensor_cpu: torch.Tensor, device: torch.device) -> torch.Tensor:
     if not getattr(tensor_cpu, "is_ramtorch", False):
         return tensor_cpu.to(device, non_blocking=True)
