@@ -1048,6 +1048,31 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             unbound = bound.__func__ if inspect.ismethod(bound) else bound
             disabled_fn = torch.compiler.disable(unbound, recursive=False)
             self.get_imgids = types.MethodType(disabled_fn, self)
+
+        # Disable compilation for RamTorch CUDA stream/event operations.
+        # AsyncTensorStreamer.transfer uses manual CUDA streams and events that the
+        # inductor backend cannot handle, causing "Event device type CPU does not match
+        # recording stream's device type CUDA". We dynamically wrap these functions here
+        # (before any torch.compile calls) so the disabling is guaranteed to be in place
+        # regardless of whether the static @torch.compiler.disable() decorators in lora.py
+        # are present in the installed package.
+        try:
+            from musubi_tuner.networks import lora as lora_module
+            lora_module.transfer_ramtensor_to_device = torch.compiler.disable(
+                lora_module.transfer_ramtensor_to_device
+            )
+            if hasattr(lora_module, 'AsyncTensorStreamer'):
+                lora_module.AsyncTensorStreamer.transfer = torch.compiler.disable(
+                    lora_module.AsyncTensorStreamer.transfer
+                )
+            if hasattr(lora_module, 'LoRAModule'):
+                lora_module.LoRAModule._ramtorch_org_forward = torch.compiler.disable(
+                    lora_module.LoRAModule._ramtorch_org_forward
+                )
+            logger.info("Disabled torch.compile for RamTorch CUDA stream operations")
+        except (ImportError, AttributeError):
+            pass  # LoRA module not available, no action needed
+
         torch._dynamo.config.cache_size_limit = 64
         backend, mode, dynamic, fullgraph = self.compile_args
         dynamic = None if dynamic is None else dynamic.lower() in "true"
