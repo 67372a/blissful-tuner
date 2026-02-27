@@ -179,38 +179,8 @@ class LoRAModule(torch.nn.Module):
 
         del self.org_module
 
-    @torch.compiler.disable()
-    def _ramtorch_org_forward(self, x):
-        """Forward pass for RamTorch modules that avoids BouncingLinearFn.apply().
-
-        Instead of calling org_forward (which triggers BouncingLinearFn and saves
-        the full CPU weight tensor in the autograd graph via ctx.save_for_backward),
-        we manually transfer the weight to GPU and call F.linear directly.
-
-        This prevents the autograd graph from holding references to ALL CPU weight
-        tensors simultaneously during backward, which was causing excessive system
-        memory usage.
-        """
-        org_module = self._org_module_ref[0]
-        weight = transfer_ramtensor_to_device(org_module.weight, x.device)
-        bias = None
-        if org_module.bias is not None:
-            bias = transfer_ramtensor_to_device(org_module.bias, x.device)
-        # Detach weight/bias so they don't accumulate grads (they're frozen),
-        # but do NOT use torch.no_grad() — x must remain in the autograd graph
-        # so gradients can flow back through this path to upstream LoRA modules.
-        weight = weight.detach()
-        if bias is not None:
-            bias = bias.detach()
-        org_out = torch.nn.functional.linear(x, weight, bias)
-        return org_out
-
     def forward(self, x):
-        # Use optimized path for RamTorch to avoid saving CPU weights in autograd
-        if getattr(self, 'is_ramtorch_org', False) and hasattr(self, '_org_module_ref'):
-            org_forwarded = self._ramtorch_org_forward(x)
-        else:
-            org_forwarded = self.org_forward(x)
+        org_forwarded = self.org_forward(x)
 
         # module dropout
         if self.module_dropout is not None and self.training:
