@@ -1073,6 +1073,13 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         except (ImportError, AttributeError):
             pass  # LoRA module not available, no action needed
 
+        # Hard graph-break get_time_embedding so it never gets traced/compiled or inlined.
+        bound = self.get_time_embedding
+        unbound = bound.__func__ if inspect.ismethod(bound) else bound
+        disabled_fn = torch.compiler.disable(unbound, recursive=False)
+        self.get_time_embedding = types.MethodType(disabled_fn, self)
+        logger.info("Disabled torch.compile for get_time_embedding (stream/event mismatch workaround)")
+        # 
         torch._dynamo.config.cache_size_limit = 64
         backend, mode, dynamic, fullgraph = self.compile_args
         dynamic = None if dynamic is None else dynamic.lower() in "true"
@@ -1083,7 +1090,7 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         # The default RoPE uses complex numbers and doesn't compile well as such, so only compile the alternate one which avoids them.
         if self.rope_func == "comfy":
             self.rope_embedder = torch.compile(self.rope_embedder, **self.compile_args)
-        self.get_time_embedding = torch.compile(self.get_time_embedding, **self.compile_args)
+        # self.get_time_embedding = torch.compile(self.get_time_embedding, **self.compile_args) # temp remove
         # self.head = torch.compile(self.head, **self.compile_args)
         for block in self.blocks:
             block._forward = torch.compile(block._forward, **self.compile_args)  # Actual rope will be compiled as part of forward
