@@ -196,10 +196,13 @@ class LoRAModule(torch.nn.Module):
         bias = None
         if org_module.bias is not None:
             bias = transfer_ramtensor_to_device(org_module.bias, x.device)
-        # Use .data to prevent the large original weight from entering autograd.
-        # The LoRA parameters (lora_up/lora_down) still have gradients tracked normally.
-        with torch.no_grad():
-            org_out = torch.nn.functional.linear(x, weight.data, bias.data if bias is not None else None)
+        # Detach weight/bias so they don't accumulate grads (they're frozen),
+        # but do NOT use torch.no_grad() — x must remain in the autograd graph
+        # so gradients can flow back through this path to upstream LoRA modules.
+        weight = weight.detach()
+        if bias is not None:
+            bias = bias.detach()
+        org_out = torch.nn.functional.linear(x, weight, bias)
         return org_out
 
     def forward(self, x):
