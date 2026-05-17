@@ -133,6 +133,18 @@ def parse_args() -> argparse.Namespace:
         "--lora_multiplier", type=float, nargs="*", default=None, help="LoRA multiplier(s), align with lora_weight order"
     )
     parser.add_argument("--fps", type=int, default=24, help="FPS for output video, 24 is default for K5")
+    parser.add_argument(
+        "--use_pinned_memory_for_block_swap",
+        action="store_true",
+        help="use pinned memory for block swapping, which may speed up data transfer between CPU and GPU but uses more shared GPU memory on Windows",
+    )
+    parser.add_argument(
+        "--attn_mode",
+        type=str,
+        default=None,
+        choices=["flash2", "flash3", "torch", "sageattn", "xformers", "sdpa"],
+        help="Sets attention backend, exclusive of the direct options like `--sdpa`, `--flash_attn` etc. but maintained for compatibility/continuity.",
+    )
     parser = add_blissful_k5_args(parser)
     return parser.parse_args()
 
@@ -140,6 +152,20 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     args = parse_blissful_args(args)
+    args.compile_dynamic = args.compile_dynamic == "true" if args.compile_dynamic != "auto" else None
+    if args.attn_mode:
+        args.sdpa = args.flash3 = args.sage_attn = args.xformers = args.flash_attn = False
+        if args.attn_mode in {"torch", "sdpa"}:
+            args.sdpa = True
+        elif args.attn_mode == "flash2":
+            args.flash_attn = True
+        elif args.attn_mode == "flash3":
+            args.flash3 = True
+        elif args.attn_mode == "sageattn":
+            args.sage_attn = True
+        elif args.attn_mode == "xformers":
+            args.xformers = True
+
     if args.fp8_fast and not args.fp8_scaled:
         raise ValueError("`--fp8_fast` requires `--fp8_scaled` but it is not enabled!")
 
@@ -178,7 +204,7 @@ def main():
         logger.info("Enabling torch.compile!")
         from musubi_tuner.kandinsky5.models.nn import activate_compile
 
-        activate_compile()
+        activate_compile(args.compile_backend, args.compile_mode, args.compile_fullgraph, args.compile_dynamic)
 
     args.vae_dtype = ensure_dtype_form(args.vae_dtype, out_form="torch")
     task_conf = TASK_CONFIGS[args.task]
@@ -208,8 +234,8 @@ def main():
 
     device = _get_device(args.device)
 
-    if args.advanced_i2v and task_conf.attention.type == "nabla":
-        raise ValueError("Cannot allow '--advanced_i2v' when NABLA attention is enabled!")
+    if args.advanced_i2vi and task_conf.attention.type == "nabla":
+        raise ValueError("Cannot allow '--advanced_i2vi' when NABLA attention is enabled!")
 
     width = args.width or task_conf.resolution
     height = args.height or task_conf.resolution
@@ -219,12 +245,19 @@ def main():
     frames = args.frames or (5 if task_conf.dit_params.visual_cond else 1)
     i2v_mode = "first_last" if args.image_last else "first"
     steps = args.steps or task_conf.num_steps
-    args.steps = steps  # Previewer need
-
     guidance = args.guidance_scale if args.guidance_scale is not None else task_conf.guidance_weight
     scheduler_scale = args.scheduler_scale if args.scheduler_scale is not None else (task_conf.scheduler_scale or 1.0)
     latent_h = max(1, height // 8)
     latent_w = max(1, width // 8)
+
+    args.steps = steps  # Save these back for metadata etc
+    args.width = width
+    args.height = height
+    args.frames = frames
+    args.video_length = ((args.frames - 1) * 4) + 1
+    args.guidance_scale = guidance
+    args.flow_shift = args.scheduler_scale = scheduler_scale
+
     shape = (1, frames, latent_h, latent_w, task_conf.dit_params.in_visual_dim)
     logger.info(
         f"WHF: {width}x{height}x{args.video_length}, Latent WHF: {latent_w}x{latent_h}x{frames}, Steps: {steps}, Guidance: {guidance}, Shift: {scheduler_scale}"
@@ -277,14 +310,19 @@ def main():
             torch.backends.cuda.matmul.fp32_precision = "tf32"
 
         # Prepare I2V
-        i2v_frames = None
+        image_edit = "-i2i-" in args.task
+        i2vi_frames = None
         # Optional init image(s) -> latent first/last frames (i2v-style). Requires temporary VAE load.
         if args.image:
-            is_flux_vae = "-i2i-" in args.task
+            is_flux_vae = "2i-" in args.task
             vae_for_encode = trainer._load_vae_for_sampling(args, device=device)
-            max_area = 2048 * 2048 if args.advanced_i2v else 512 * 768 if int(task_conf.resolution) == 512 else 1024 * 1024
-            divisibility = 16 if args.advanced_i2v or task_conf.attention.type != "nabla" else 128
-            size_override = None if not args.advanced_i2v else (height, width)
+            if args.i2vi_res_limit is not None:
+                max_area = args.i2vi_res_limit * args.i2vi_res_limit
+                logger.info(f"Max area for i2vi updated to {args.i2vi_res_limit}*{args.i2vi_res_limit}")
+            else:
+                max_area = 4096 * 4096 if args.advanced_i2vi else 512 * 768 if int(task_conf.resolution) == 512 else 1024 * 1024
+            divisibility = 16 if args.advanced_i2vi or task_conf.attention.type != "nabla" else 128
+            size_override = None if not args.advanced_i2vi else (height, width)
             # Always encode the first image
             _, lat_image_first, _ = get_first_frame_from_image(
                 args.image,
@@ -308,21 +346,26 @@ def main():
                     is_flux_vae=is_flux_vae,
                 )
                 frame_list.append(lat_image_last[:1])
-            i2v_frames = torch.cat(frame_list, dim=0)
+            i2vi_frames = torch.cat(frame_list, dim=0)
             # If the init image was resized by the encoder, match sampling shape to it.
-            if i2v_frames is not None:
-                latent_h = int(i2v_frames.shape[1])
-                latent_w = int(i2v_frames.shape[2])
+            if i2vi_frames is not None:
+                latent_h = int(i2vi_frames.shape[1])
+                latent_w = int(i2vi_frames.shape[2])
                 old_w = width
                 old_h = height
                 width = latent_w * 8
                 height = latent_h * 8
                 shape = (1, frames, latent_h, latent_w, task_conf.dit_params.in_visual_dim)
                 if old_w != width or old_h != height:
-                    logger.warning(f"I2VI updated resolution (W*H) to: {width}x{height}, latent: {latent_w}x{latent_h}")
+                    logger.warning(f"I2VI updated output resolution (W*H) to: {width}x{height}, latent: {latent_w}x{latent_h}")
             vae_for_encode.to("cpu")
             del vae_for_encode
             clean_memory_on_device(device)
+
+        if args.i2vi_extra_noise and i2vi_frames is not None:
+            logger.info(f"I2VI adding {args.i2vi_extra_noise * 100}% extra noise to conditioning latent")
+            bonus_noise = torch.randn_like(i2vi_frames[0:1])
+            i2vi_frames[0:1] = i2vi_frames[0:1] + (bonus_noise * args.i2vi_extra_noise)
 
         text_embedder_conf = SimpleNamespace(
             qwen=SimpleNamespace(checkpoint_path=qwen_path, max_length=task_conf.text.qwen_max_length),
@@ -335,7 +378,6 @@ def main():
             qwen_auto=args.text_encoder_auto,
         )
 
-        image_edit = "-i2i-" in args.task
         te_image = None
         if image_edit and args.image:
             pil_image = _to_pil(args.image)
@@ -421,7 +463,9 @@ def main():
             dit.dtype = dit_weight_dtype
 
         if args.blocks_to_swap > 0:
-            dit.enable_block_swap(args.blocks_to_swap, device, supports_backward=False, use_pinned_memory=False)
+            dit.enable_block_swap(
+                args.blocks_to_swap, device, supports_backward=False, use_pinned_memory=args.use_pinned_memory_for_block_swap
+            )
             dit.move_to_device_except_swap_blocks(device)
             dit.prepare_block_swap_before_forward()
         else:
@@ -456,7 +500,7 @@ def main():
                 null_text_embeds=null_text_embeds,
                 null_pooled_embed=null_pooled_embed,
                 null_attention_mask=None,
-                i2v_frames=i2v_frames,
+                i2vi_frames=i2vi_frames,
                 num_steps=steps,
                 guidance_weight=guidance,
                 scheduler_scale=scheduler_scale,

@@ -252,7 +252,7 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
     --max_train_epochs 50 
 ```
 
-For I2V training, switch the task and checkpoint to an I2V preset (e.g., `k5-pro-i2v-5s-sd` with `kandinsky5pro_i2v_sft_5s.safetensors`). The latent cache already stores first and last frame latents (`latents_image`, two frames) when you run `kandinsky5_cache_latents.py`, so the same cache covers both first-only and first+last modes—no extra flags are needed beyond picking an I2V task. For image models (T2I or I2I), make sure to use the Flux VAE and set the appropriate task (`k5-lite-t2i-hd` or `k5_lite_i2i_hd`) here, as well as passing `--image_model_training` to `kandinsky5_cache_latents.py` when caching the latents in the previous step.
+For I2V training, switch the task and checkpoint to an I2V preset (e.g., `k5-pro-i2v-5s-sd` with `kandinsky5pro_i2v_sft_5s.safetensors`). The latent cache already stores first and last frame latents (`latents_image`, two frames) when you run `kandinsky5_cache_latents.py`, so the same cache covers both first-only and first+last modes—no extra flags are needed beyond picking an I2V task. For image models (T2I or I2I), make sure to use the Flux VAE and set the appropriate task (`k5-lite-t2i-hd` or `k5-lite-i2i-hd`) here, as well as passing `--image_model_training` to `kandinsky5_cache_latents.py` when caching the latents in the previous step.
 
 **Note on first+last frame conditioning**: First+last frame training support is experimental. The effectiveness and plausibility of this approach have not yet been thoroughly tested. Feedback and results from community testing are welcome.
 
@@ -431,16 +431,24 @@ python kandinsky5_generate_video.py \
 - `--prompt`: Text prompt for generation
 - `--negative_prompt`: Negative prompt (optional)
 - `--save_path`: Output folder path
-- `--width`, `--height`: Output resolution (defaults from task config)
+- `--width`, `--height`: Output resolution (defaults from task config). I2VI may override this if `--advanced_i2v` not specified!
 - `--video_length`: Number of video frames to generate (exclusive of `--frames`)
 - `--frames`: Number of latent frames to generate (exclusive of `--video_length`)
 - `--steps`: Number of inference steps (defaults from task config)
 - `--guidance_scale`: Guidance scale (defaults from task config)
-- `--seed`: Random seed
+- `--seed`: Random seed, can be an integer or a string! Yep, really!
 - `--fp8_scaled`: Use fp8 scaled quantization to reduce size of DiT and save memory/VRAM
+- `--fp8_fast`: Use fast fp8 math available on RTX 40X0 (Ada Lovelace) and potentially later GPUs to improve speed substantially for a small quality loss
+- `--fp16_fast`: Use optimized fp16 math and fp16 accumulation available in PyTorch 2.7 or later to improve speed substantially. Quality loss is small for Video Pro but may be noticeable for Video Lite and Image!
+- `--text_encoder_auto`: Auto split the text encoder between GPU and CPU. Use this if you OOM when encoding prompts!
+- `--advanced_i2vi`: Eases restrictions on size/shape for I2V/I2I modes and automatically scales input image to requested video size but pushing the model too far outside what it expects can cause issues so use smartly!
+- `--i2vi_res_limit`: Override max resolution for I2V/I2I calculations, specify as one side of a square e.g. specify '2048' for 2048*2048. Same caution as previous.
+- `--i2vi_extra_noise`: Add this much extra latent noise to the input image for transformer conditioning. Can sometimes improve detail/variation but too much will degrade quality, around 0.05 (5%) is a good place to start.
 - `--blocks_to_swap`: Number of blocks to offload to CPU
 - `--lora_weight`: Path(s) to LoRA weight file(s)
 - `--lora_multiplier`: LoRA multiplier(s)
+- `--optimized`: Overrides the default values of several command line args to provide an optimized but quality experience. Enables fp16_fast or fp8_fast depending on mode and hardware, fp8_scaled, sageattn and torch.compile. Requires SageAttention and Triton to be installed in addition to PyTorch 2.7.0 or higher!
+- `--preview_latent_every`: If specified, enables previews (saved to output folder as latent_preview.mp4/png) of the current generation every N steps. By default uses latent2RGB (very fast, lower quality) but can optionally use `--preview_vae` to specify a [TinyAutoencoder](https://huggingface.co/Blyss/BlissfulModels/tree/main/taehv) for fast, high quality previews! Use taehv for Video Pro/Lite and taef1 for Image!
 
 Additional tasks such as Lite and Image tasks are also available as well as various speed optimizations. For a complete list of available flags, please see `python kandinsky5_generate_video.py --help`.
 
@@ -455,16 +463,24 @@ Additional tasks such as Lite and Image tasks are also available as well as vari
 - `--prompt`: 生成用のテキストプロンプト
 - `--negative_prompt`: ネガティブプロンプト（オプション）
 - `--save_path`: 出力フォルダのパス
-- `--width`, `--height`: 出力解像度（タスク設定からのデフォルト）
+- `--width`, `--height`: 出力解像度（タスク設定からのデフォルト）。`--advanced_i2v` が指定されていない場合、I2VI はこれを上書きする可能性があります。
 - `--video_length`: 生成するビデオフレーム数（`--frames` を除く）
 - `--frames`: 生成する潜在フレーム数（`--video_length` を除く）
 - `--steps`: 推論ステップ数（タスク設定からのデフォルト）
 - `--guidance_scale`: ガイダンススケール（タスク設定からのデフォルト）
-- `--seed`: ランダムシード
+- `--seed`: ランダムシード。整数または文字列を指定できます。はい、本当にそうです！
 - `--fp8_scaled`: fp8スケールの量子化を使用してDiTのサイズを縮小し、メモリ/VRAMを節約します
+- `--fp8_fast`: RTX 40X0 (Ada Lovelace) およびそれ以降の GPU で利用可能な高速 fp8 演算を使用して、わずかな品質損失で速度を大幅に向上させます
+- `--fp16_fast`: PyTorch 2.7 以降で利用可能な最適化された fp16 演算および fp16 累算を使用して、速度を大幅に向上させます。 Video Pro では品質の低下はわずかですが、Video Lite と Image では顕著になる可能性があります。
+- `--text_encoder_auto`: テキスト エンコーダーを GPU と CPU の間で自動分割します。プロンプトをエンコードするときに OOM する場合は、これを使用してください。
+- `--advanced_i2vi`: I2V/I2I モードのサイズ/形状の制限を緩和し、入力画像を要求されたビデオ サイズに自動的にスケールしますが、モデルを期待値から大きく外しすぎると問題が発生する可能性があるため、賢く使用してください。
+- `--i2vi_res_limit`: I2V/I2I 計算の最大解像度をオーバーライドします。正方形の一辺として指定します。 2048*2048 には「2048」を指定します。前回と同様の注意。
+- `--i2vi_extra_noise`: トランスコンディショニングのために、この量の余分な潜在ノイズを入力画像に追加します。ディテールやバリエーションを改善できる場合もありますが、多すぎると品質が低下するため、0.05 (5%) 程度から始めるとよいでしょう。
 - `--blocks_to_swap`: CPUにオフロードするブロック数
 - `--lora_weight`: LoRA重みファイルへのパス
 - `--lora_multiplier`: LoRA係数
+- `--optimized`: いくつかのコマンドライン引数のデフォルト値をオーバーライドし、最適化された高品質なエクスペリエンスを提供します。モードとハードウェアに応じて fp16_fast または fp8_fast、fp8_scaled、sageattn、torch.compile を有効にします。PyTorch 2.7.0 以降に加えて、SageAttention と Triton がインストールされている必要があります。
+- `--preview_latent_every`: 指定すると、現在の世代のNステップごとのプレビュー（出力フォルダにlatent_preview.mp4/pngとして保存）が有効になります。デフォルトではlatent2RGB（非常に高速、低品質）を使用しますが、オプションで`--preview_vae`を使用して[TinyAutoencoder](https://huggingface.co/Blyss/BlissfulModels/tree/main/taehv)を指定し、高速で高品質のプレビューを実現できます。Video Pro/Liteの場合はtaehv、Imageの場合はtaef1を使用してください。
 
 LiteタスクやImageタスクなどの追加タスクに加え、様々な速度最適化も利用可能です。利用可能なフラグの完全なリストについては、`python kandinsky5_generate_video.py --help` を参照してください。
 

@@ -6,7 +6,7 @@ Blyss Sarania による Musubi Tuner の Blissful な拡張機能
 
 (このセクションは機械翻訳です)
 
-ここでは、生成動画モデルを扱うためのツールスイートの作成に重点を置いた、高度で実験的な機能を備えたMusubi Tunerの拡張バージョンをご覧いただけます。動画生成時にプレビューしたり、推論速度を向上させたり、動画を長くしたり、作成した動画をより細かく制御したり、VFIやアップスケーリングなどで動画を強化したりできます。Musubiをさらに活用したい方は、ぜひこの機会にお試しください。最適なパフォーマンスと互換性を得るには、Python 3.12とPyTorch 2.7.0以降を推奨します。「requirements.txt」に追加の要件が追加されているため、通常のMusubiから移行する場合は、再度`pip install -r requirements.txt`を実行する必要があります。開発はPython 3.12で行われていますが、3.10との互換性も維持するよう努めています。
+ここでは、生成動画モデルを扱うためのツールスイートの作成に重点を置いた、高度で実験的な機能を備えたMusubi Tunerの拡張バージョンをご覧いただけます。動画生成時にプレビューしたり、推論速度を向上させたり、動画を長くしたり、作成した動画をより細かく制御したり、VFIやアップスケーリングなどで動画を強化したりできます。Musubiをさらに活用したい方は、ぜひこの機会にお試しください。最適なパフォーマンスと互換性を得るには、Python 3.12とPyTorch 2.7.0以降を推奨します。「requirements.txt」に追加の要件が追加されているため、通常のMusubiから移行する場合は、再度`pip install -r requirements.txt`を実行する必要があります。開発はPython 3.12で行われていますが、3.10との互換性も維持するよう努めています。貢献は大歓迎です。詳細は [CONTRIBUTING.md](./CONTRIBUTING.md) をご覧ください。
 
 重要事項：MusubiとBlissfulを切り替える際は、同じvenvに通常のMusubi TunerまたはBlissful Tunerのいずれか一方のみをインストールし、既存のものをアンインストールしてください（例：`pip uninstall blissful-tuner`）。Blissful TunerはMusubi Tunerの上に直接構築されており、多くのファイルを共有しています。この手順を踏まずに切り替えると、多くの問題が発生する可能性があります。よろしくお願いいたします。
 
@@ -43,6 +43,8 @@ Musubi Tunerの開発に尽力いただいたkohya-ssさん、重要なコード
 - Wanと同じアルゴリズムを使用したFP8スケールのサポート (`--fp8_scaled`、推論と学習の両方に強く推奨。FP8が優れているだけなので、これだけ知っておく必要があります!) (HY) (T)
 - CLIP用のプロンプトの分離 (`--prompt_2 "second prompt goes here"`、CLIPはよりシンプルなテキストに使用されるため、CLIPとは異なるプロンプトを提供します) (HY)
 - https://github.com/zer0int/ComfyUI-HunyuanVideo-Nyan に基づいてテキストエンコーダーを再スケール (`--te_multiplier llm clip`、例えば`--te_multiplier 0.9 1.2`のように、LLMの重みをわずかに下げ、CLIPの重みを上げる)（HY）
+- トレーニング モードと推論モードの両方で、Kandinsky5 モデルの完全なスイート (Video Pro/Video Lite T2V/I2V、Image Lite T2I、Image Edit) のサポートが大幅に改善されました。詳細については[ドキュメント](./docs/kandinsky5.md)を参照してください。
+
 
 モデルに依存しない追加機能：
 （以下のスクリプトを使用する場合は、`--group postprocess` オプションを使用してプロジェクトを venv にインストールしてください（例：`pip install -e . --group postprocess --group dev` ですべての要件を完全にインストールしてください！）
